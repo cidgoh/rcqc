@@ -1,0 +1,223 @@
+<tool id="report_calc" name="Report Calc" version="0.1.0" refresh_on_change="True">
+	<description>This tool produces output reports in JSON, tabular or HTML format based on selected variables retrieved from log and report files.</description>
+	<requirements>
+		<requirement type="package" version="0.1.0">report_calc</requirement>
+	</requirements>
+    <stdio>
+        <exit_code range="1:" />
+    </stdio>
+    <requirements>
+    </requirements>
+    <command interpreter="python"><![CDATA[
+        report_calc.py
+        -H "$html_file" 
+        -f "$html_file.files_path"
+        -i "
+        #for $i, $f in enumerate($input_files)
+        	$f.file_name:$f.name:$f.ext
+        #end for
+        "
+        -r "$rules_file"
+        
+        #if $output_json
+        -o "$output_json_file"
+        #end if
+        
+	   -e "$rule_sections"
+	   
+        #if len($custom)
+        -c "$custom_rules"
+        #end if
+
+        #if $save_rules
+        -s "$save_rule_file"
+        #end if
+    ]]></command>
+    
+    <inputs>
+		<param name="input_files" type="data" format="tabular,txt,json" multiple="true" label="Log or report file(s) to analyze"/> 
+		<param name="rules_file" type="data" format="json" label="Rule file"	 optional="False" refresh_on_change="True" /> 
+
+		<param name="rule_sections" type="select" label="Rule section execution" dynamic_options="get_rule_section(rules_file)" multiple="true" help="Select which sections of the rule file should be executed." />
+		
+		<repeat name="custom" title="Modify rule section" >
+			
+			<param name="rule_position" type="select" label="At rule" dynamic_options="get_rule_list()" multiple="false"  />
+
+			<param name="drop_rule" type="boolean" label="Drop this rule" truevalue="1" falsevalue="0"/>
+			<param name="rules" type="text" area="True" size="5x50" label="Add rule(s) in format: function (parameter1 parameter2 ...) ..." />
+			<param name="function_list" type="select" label="Function reference"  dynamic_options="get_function_list()" help="Look up function definitions here for functions used in you rules." />
+		</repeat>	
+		
+		<param name="save_rules" type="boolean" label="Save new rule set" help="If you customize your rule set you can save it to a new rule file" default="False" />	
+
+		<param name="output_json" type="boolean" label="Output 'report/' namespace as json dataset" help="This can be input to a subsequent report engine" default="False" />	
+		
+    </inputs>
+    
+    <configfiles>
+		<configfile name="custom_rules">	[
+	#set $sep3 = ''
+	#for $rule_choice in $custom
+	$sep3{"row": "$rule_choice.rule_position",
+	 "drop": $rule_choice.drop_rule,
+	 "rules": "$rule_choice.rules.replace(r'"',r'\"').replace('\n',r'\n')"
+	}
+	#set $sep3 = ', '
+	#end for 
+]
+		</configfile>
+	</configfiles>
+
+    <outputs>
+		<data format="html" name="html_file" label="Report Calc Folder"/>
+		<data name="output_json_file" format="json" label="Report Calc - JSON">
+			<filter>(output_json == True)</filter>
+		</data>
+		<data name="save_rule_file" format="json" label="Report Calc Rules">
+			<filter>(save_rules == True)</filter>
+		</data>    	
+    </outputs>
+
+	<code file="report_calc_form.py" />
+	
+    <help><![CDATA[
+===========
+Report Calc
+===========
+This tool retrieves and reports on workflow application output data, and it liaises with the overarching workflow engine via its own exit codes.  It uses a basic functional rule language and runtime interpreter to evaluate a rule file containing statements that text-mine data and log files for key reporting variables, fashion a report, and execute QC metric decisions.  Rules can locate and parse numeric, boolean and other data from the input files which can be in text, tabular and JSON format.  The design goal is to allow safe, easy trial manipulation of rules and parameters that affect workflow processing.
+
+Each rule is expressed as a function followed by parameters, where each parameter can also be a function with parameters.  The rule file itself is coded in JSON in infix notation as rules of form "function(parameter1 parameter2 ...).  Rules are executed from top to bottom. 
+
+If after all the rules have processed, a rule has set a namespace variable called **"report/job/status"** to **"fail"**, that will cause a tool exit code of 1 to be returned to Galaxy after the report is written.  This enables a job to be marked in an error state as a result of QC reporting. Currently however one cannot make other workflow apps conditional on earlier Report Calc success, so one cannot stop other parts of a workflow early.
+
+Namespace
+---------
+The Report Calc namespace is used by rules to access and set its in-memory data structure.  The namespace syntax is a variation on the familiar file system x/y/z style location path in which each level in a hierarchy is separated by a forward slash.  Any variable can be saved to a namespace location since each branch of this hierarchy is a (python) dictionary supporting alphanumeric names, or is a python list of items.  When assigning a value, for example, stating “store(4857000 report/contigs/reference_genome_size)”, any heretofore missing path level, e.g “contigs/”, is created as a dictionary.  Python dictionary keys allow any string, so this accommodates keys that contain dashes, periods, spaces and semicolons (but we disallow forward slashes because of their use in the namespace syntax).  This conveniently allows most text labels and their values to be copied directly from text files.
+
+ If the tailing /z part of a name is unique, one can use that instead of the whole x/y/z part when specifying a function parameter. e.g. once "report/paired_read/min_overlap_status" has been set, it can be referred to by "/min_overlap_status".  Note that any subsequent rule that sets "min_overlap_status" in some other location path, including the root, causes future references to point to that location.
+
+Make sure your top-level parameter names don't collide with any function names since they will then be mistaken for functions (i.e. no top level dictionary named "pow" or "degrees" or "add" allowed). 
+ 
+Often-used namespace dictionaries and lists:
+
+	- **report/...** # Overall namespace for generated report.  All its subordinate dictionaries and arrays of values is written by the Report Calc tool to the tool's output JSON report file.
+	- **files/[0..N]** # List of all input files as {'file_path':_, 'file_label':_, 'file_type':_} objects.
+	- **file_names/[file label]** # dictionary of files by file_name key.  
+	- **iterator/[call depth]** # Provides the dictionary for each current function evaluation (at call depth) for iterators.
+	- **rulesets/[section object]** # List of rule sections.
+
+The "store(value location)" function and some other functions ALWAYS require a fully specified name path for a namespace location so that the value is placed appropriately. If a path expression contains brackets, for example "file/logs/%(name)", it needs to be in quotes, or else it will erroniously be parsed into a function with parameters.
+
+Input files
+-----------
+Each input file's basic information is placed into a row of namespace **files/[0..N]** array.  Each row contains a dictionary (object) having **file_label**, **file_path**, and **file_type** keys.  As well, the same information is available through namespace **file_names/[file label]** dictionary.  Both individual file selections and files in a data collection are handled this way.
+
+Key functions:
+---------------------
+
+	- **store(value location)**: the expression is evaluated, and placed in namespace variable indicated by location.   This can consume iterable data, e.g. where value is an iterable function.
+	- **if (conditional consequent)** and **iif(conditional true_consequent false_consequent)** conditionally allow expressions to be evaluated, and variables to be set.
+	- **regexp(string regular_expression [nameUnderScore|nameCamelCase])** which is an Iterable, see below.
+	- All the Python **operator** and **math** functions (like **add(a b)** ) can be used to perform calculations.
+	- **loadFileByName(file_label)** command reads the given input text file's contents entirely into the namespace memory.
+	- **readFileByName(file_label)** command is an iterator that reads given input text file line by line. 
+	- **Iterable** functions provide dictionaries of form {"value": X, "name": Y, ... } back to the store() or iterate() commands.
+
+Regular Expressions
+-------------------
+The **regexp()** command (built on python's iterfind() ) uses python regular expression "named groups" to capture datums into an iterable array of dictionaries.  Each array row is a dictionary with keys containing matches to the named groups defined in the regular expression.  At a minimum this should include a  group called "value", i.e. (?P<value>...).  For example regular expression "Parameter: phred score = (?P<value>[0-9]+)" has a dictionary with a "value" key set to the matching integer.  
+
+By default, using the parseDataType(string) command, an attempt is made to convert each found dictionary "value" key string into its integer, float or boolean true/false data type (if any) so that operator and math operations can later be appied to them directly.
+
+Special store(iterator location function1 ...) function
+-------------------------------------------------------
+Sometimes we need to read each line of a file and run several functions on the line (e.g. tallying GC content).  To allow this, the store() function has been extended to allow functions to be included after the location parameter.  When an iteration of the "value" parameter occurs, it generates a dictionary that is used to set "location".  Then **function1(...)** is executed, and then **function2(...)** etc. .  A function can acces the iteration's dictionary via a special namespace "iterator/[function call depth]" reference.  For example fn1 can access "iterator/0/value" where "0" is the depth of the caller store() function.   A call to **iterate(iterator function1(...) function2(...) ...)** can do the same thing.
+
+Editing Rules
+-------------
+The Report Calc form shows the option of replacing one or more rules in a given rule file with new rules, thus allowing one to try out different operational thresholds and tests.  After clicking on the "Insert Modify rule section" button, you will be able to select a rule to modify.  You have the option of droping that rule, and/or adding new rules after it using the text input below. 
+
+**Parameters:** Enter space-delimited parameters (no commas!). Any string parameters that have spaces, or characters in "%<>()" should be quoted.  Backslashes and quotes in strings (e.g. like in regular expressions) should be escaped (e.g. \ becomes \\).  Parameters can include imbedded functions (e.g. add(1 2)). Once your changes test out ok, you can save this new rule file for future use. 
+
+Rules are organized by section.  If you want to start a new rule file you will first have to upload a json file with the appropriate rulesets[{"name":"My section","rules":[... list of rules]},{"name":"My next section",...] structure.  Similarly, adding a new section to an existing rule file will require editing the rules array.
+
+Example Rules
+----------------------
+Example input, rule and output report files are in this tool's installation test-data folder.  The JSON rule file shows rules in a slightly different format, namely bracket expressions like "foo(bar(param) )" are transformed into polish/infix notation: ['foo', ['bar' , 'param' ] ] . Whitespace is flexible, but rules must have  whitespace between parameters, not commas.
+
+	store( loadFileByName(flash.log)   file/flash/flash_text)
+	
+		Shows loading of flash.log file text content into namespace file/flash/flash_text.  Requires a match to input file list file_name.
+
+	store(test: report/prokka_1_liner)
+
+		Stores "test:" text into variable.
+		
+	store( "\\[FLASH]\\s*(?P<name>\\w+[\\s\\w]*):\\s*(?P<value>[^\\n]*)" myregex/flash_re_param)
+
+		Storing a regular expression into /flash_re_param.
+		
+	store( regexp ( /flash_text "\\[FLASH]\\s*Min overlap:\\s*(?P<value>\\d+)" report/paired_read/min_overlap)
+	
+		Shows use of short "/flash_text" variable reference rather than full "file/flash/flash_text".  This can be done where tailing name is not ambiguous.
+		
+	store( format( "%(value)s bp" regexp ( /flash_text "\\[FLASH]\\s*Max overlap:\\s*(?P<value>\\d+)")  report/paired_read.max_overlap)
+
+		Shows optional python format string that can transform output.  By default 'value' key is passed directly.  More than one dictionary item can be used.
+		
+	store( regexp /flash_text "\\[FLASH]\\s*Processed\\s+(?P<value>\\d+) read pairs") report/paired_read/process_pair_log )
+	
+		Shows conversion of regex dictionary results into an array.
+		
+	store( N50 (/process_pair_log ) report/paired_read/process_pair_N50)
+	
+	store( regexp ( /flash_text "\\[FLASH]\\s*(?P<name>\\w+) reads:\\s*(?P<value>\\d+)" "report/paired_read/%(name)s")
+     	
+     	Shows how names of fields can be matched and copied into report along with values.
+
+	store( section ( /flash_text "[FLASH] Input files:" "[FLASH] Output files:") temp/file_list )
+	
+		Shows how a temporary variable can be used as intermediate output. (?s) flag enables '.' to match newline.
+		
+	store( section /flash_text  "[FLASH] Parameters:" "[FLASH] Starting reader and writer threads" /flash_re_param") "report/flash/parameters_section/%(name)s")
+	
+	store( regexp temp/file_list  "\\[FLASH]\\s*(?P<value>[\\/\\-\\.\\w]+)" )   "report/paired_read/files/%(DICT_ROW)s")
+	
+	store(18.2  report/paired_read/min_overlap_threshold)
+	
+		Shows setting of decimal value.
+
+	store( sqrt (/min_overlap_threshold ) report/paired_read/min_overlap_sqrt )
+	
+		Shows math.sqrt() .
+				
+	store( gt /min_overlap /min_overlap_threshold) report/paired_read/min_overlap_status)
+	
+		Greater than comparison yeilds a boolean which is placed in /min_overlap_status .
+   
+   	if ( /min_overlap_status  store( PASS /min_overlap_status) )
+   	
+   		Example conditional, and of output being overwritten.
+   		
+	store( report/paired_read/files report/silly_copy_list)
+	
+		Shows ability to copy item or structure in namespace.
+
+	store( /process_pair_log report/test_array_copy)
+	
+	store( fsum (/process_pair_log ) report/paired_read/log_sum)
+	
+	store( getitem ( rule_index report/paired_read/min_overlap_status ) report/paired_read/min_overlap_rule)
+	
+		Shows ability to display a rule associated with an output decision.
+ 
+	store( readFileByName(prokka_stats.txt) "report/prokka_text_%(DICT_ROW)s" store( add ( /prokka_1_liner add (iterator/0/value  '; ') ) ) /prokka_1_liner)
+	
+		Shows loading of second file into different namespace. Also shows fancy triggering of other functions during store() iteration.
+		
+	iterate ( readFileByName(prokka_stats.txt) store( iterator/0 "report/prokka_dict" ) store( add( /prokka_1_liner add( iterator/0/value '; ') )  /prokka_1_liner )
+		
+		Similar to previous statement.  Uses readFileByName() iterator, processes each line of file using the functions that follow.  iterator/0 provides the dictionary.
+    ]]></help>
+</tool>

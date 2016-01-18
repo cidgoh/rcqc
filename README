@@ -1,0 +1,10 @@
+This tool does require a few python modules:
+
+pip install dateutils
+pip install pyparsing
+
+These will be added as dependencies soon.
+
+In meantime, if you encounter ssl (encryption key) related problems in trying to use pip to install them, you might need to run:
+
+pip install requests —upgrade

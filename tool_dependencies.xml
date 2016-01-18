@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<tool_dependency>
+	<package name="report_calc" version="0.1.0">
+		<install version="1.0">
+			<actions>
+				<action type="setup_python_environment">
+					<package>https://pypi.python.org/packages/source/d/dateutils/dateutils-0.6.6.tar.gz#md5=2ba7fcac03635f1f1cad0d94d785001b</package>
+					<package>https://pypi.python.org/packages/source/p/pyparsing/pyparsing-2.0.6.tar.gz#md5=a2d85979e33a6600148c6383d3d8de67</package>
+				</action>
+			</actions>
+		</install>
+		<readme><![CDATA[
+Report Calc
+-----------
+
+A python tool to text-mine log and other text files for variables and tabular data, and to create custom reports for this data, as well as triggering workflow halt based on quality control thresholds.  This tool requires the following additional python packages.
+
+pip install dateutils pyparsing
+
+]]> 
+		</readme>
+	</package>
+</tool_dependency>
