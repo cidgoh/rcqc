@@ -9,9 +9,9 @@ import math
 # From http://code.activestate.com/recipes/66062-determining-current-function-name/
 self_dir = os.path.dirname(sys._getframe().f_code.co_filename)
 sys.path.append(self_dir)
-import report_calc
+import rcqc
 from rcqc_functions.rcqc_functions import RCQCClassFnExtension
-from rcqc_functions.rcqc_functions import RCCQStaticFnExtension
+from rcqc_functions.rcqc_functions import RCQCStaticFnExtension
 
 DEBUG = 1
 
@@ -36,12 +36,11 @@ def get_rule_section(rules_file):
 
 	global rulesets
 	log( "\nget_rule_section() ")
-	log(rules_file.file_name)
-			
+	
 	items = []
 	
 	if rules_file:
-
+		log(rules_file.file_name)
 		log( "\ngetRulesets()  ")
 
 		try:
@@ -131,7 +130,7 @@ def get_function_list():
 	
 	log( "\nget_function_list() ")
 			
-	RC = report_calc.ReportCalc()
+	RCQC = rcqc.RCQCInterpreter()
 	
 	items = []	
 	rc_functions = []

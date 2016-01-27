@@ -52,9 +52,9 @@ def stop_err( msg, exit_code=1 ):
 	sys.stderr.write("%s\n" % msg)
 	sys.exit(exit_code)
 
-class ReportCalc(object):
+class RCQCInterpreter(object):
 	"""
-	The ReportCalc class 
+	The RCQCInterpreter class 
 	
 	General notes:
 		Most iterables yield (over and over) a dictionary containing a "value" field (usually originating from a named group regular expression of form "...<?P<name>[match expression...]>...".  Usually this includes a "DICT_ROW" key which is the row offset (or count) of the current row result since start of iterable.
@@ -1010,6 +1010,6 @@ class ReportCalc(object):
 	
 if __name__ == '__main__':
 
-	rc = ReportCalc()
-	rc.__main__()
+	rcqc = RCQCInterpreter()
+	rcqc.__main__()
 
