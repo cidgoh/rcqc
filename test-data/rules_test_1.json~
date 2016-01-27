@@ -1,21 +1,20 @@
-
 {
     "rulesets": [
         {
             "name": "settings-salmonella",
             "rules": [
                 [
-                    "store",
+                    "set",
                     4857000,
                     "report/contigs/reference_genome_size"
                 ],
                 [
-                    "store",
+                    "set",
                     "serovar Typhimurium LT2",
                     "report/contigs/reference_genome"
                 ],
                 [
-                    "store",
+                    "set",
                     0.10000000000000001,
                     "report/contigs/good_genome_size_ratio"
                 ]
@@ -25,22 +24,22 @@
             "name": "settings-ecoli",
             "rules": [
                 [
-                    "store",
+                    "set",
                     5324560,
                     "report/contigs/reference_genome_size"
                 ],
                 [
-                    "store",
+                    "set",
                     "E. coli ATCC 35150 NalR",
                     "report/contigs/reference_genome"
                 ],
                 [
-                    "store",
+                    "set",
                     "ASM93507v1",
                     "report/contigs/reference_genome_assembly"
                 ],
                 [
-                    "store",
+                    "set",
                     0.29999999999999999,
                     "report/contigs/good_genome_size_ratio"
                 ]
@@ -50,7 +49,7 @@
             "name": "processing",
             "rules": [
                 [
-                    "store",
+                    "set",
                     [
                         "loadFileByName",
                         "flash.log"
@@ -58,12 +57,12 @@
                     "file/flash/flash_text"
                 ],
                 [
-                    "store",
+                    "set",
                     "\\[FLASH]\\s*(?P<name>\\w+[\\s\\w]*):\\s*(?P<value>[^\\n]*)",
                     "myregexpressions/re_flash_param"
                 ],
                 [
-                    "store",
+                    "set",
                     [
                         "regexp",
                         [
@@ -86,12 +85,12 @@
                     [
                         "if",
                         [
+                            "eq",
                             [
                                 "getitem",
                                 "iterator/0/value",
                                 0
                             ],
-                            "==",
                             ">"
                         ],
                         [
@@ -106,7 +105,7 @@
                     ]
                 ],
                 [
-                    "store",
+                    "set",
                     [
                         "fsum",
                         "/contig_lengths"
@@ -114,17 +113,17 @@
                     "report/contigs/sample_genome_size"
                 ],
                 [
-                    "store",
+                    "set",
                     [
+                        "truediv",
                         [
                             "abs",
                             [
+                                "sub",
                                 "/sample_genome_size",
-                                "-",
                                 "/reference_genome_size"
                             ]
                         ],
-                        "/",
                         "/reference_genome_size"
                     ],
                     "report/contigs/genome_size_ratio"
@@ -132,17 +131,18 @@
                 [
                     "if",
                     [
+                        "gt",
                         "/genome_size_ratio",
-                        ">",
                         "/good_genome_size_ratio"
                     ],
                     [
-                        "fail",
-                        "report/job/status"
+                        "set",
+                        "report/status",
+                        "fail"
                     ]
                 ],
                 [
-                    "store",
+                    "set",
                     [
                         "length",
                         "/contig_lengths"
@@ -150,7 +150,7 @@
                     "report/contigs/count"
                 ],
                 [
-                    "store",
+                    "set",
                     [
                         "statisticN",
                         "/contig_lengths",
@@ -159,7 +159,7 @@
                     "report/contigs/N50"
                 ],
                 [
-                    "store",
+                    "set",
                     [
                         "statisticN",
                         "/contig_lengths",
@@ -168,7 +168,7 @@
                     "report/contigs/N99"
                 ],
                 [
-                    "store",
+                    "set",
                     [
                         "sorted",
                         "/contig_lengths"
@@ -178,35 +178,41 @@
                 [
                     "if",
                     [
+                        "lt",
                         "N50",
-                        "<",
                         200000
                     ],
                     [
-                        "fail",
-                        "report/job/status"
+                        "set",
+                        "report/job/status",
+                        "FAIL"
                     ]
                 ],
                 [
                     "if",
                     [
+                        "lt",
                         "N99",
-                        "<",
                         2000
                     ],
                     [
-                        "fail",
-                        "report/job/status"
+                        "set",
+                        "report/job/status",
+                        "FAIL"
                     ]
                 ],
                 [
                     "if",
                     [
+                        "gt",
                         "report/contigs/count",
-                        ">",
                         200
                     ],
-                    "fail"
+                    [
+                        "set",
+                        "report/job/status",
+                        "FAIL"
+                    ]
                 ],
                 [
                     "writeFile",

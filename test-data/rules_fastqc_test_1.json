@@ -1,0 +1,98 @@
+
+{
+    "rulesets": [
+        {
+            "name": "processing",
+            "rules": [
+                [
+                    "store",
+                    [
+                        "loadFileByName",
+                        "\"FastQC report\""
+                    ],
+                    "temp/FastQC"
+                ],
+                [
+                    "store",
+                    [
+                        "regexp",
+                        "/FastQC",
+                        "\"##FastQC\\s*(?P<value>\\d+(.\\d+)*)\""
+                    ],
+                    "report/FastQCVersion"
+                ],
+                [
+                    "note",
+                    "Above matches ##FastQC  X.X.X"
+                ],
+                [
+                    "iterate",
+                    [
+                        "regexp",
+                        "/FastQC",
+                        "\">>(?s)(?!END_MODULE)(?P<name>[^\\t]+)\\t(?P<state>\\w+)\\n(?P<value>[^>]*)>>END_MODULE\"",
+                        "camelCase"
+                    ],
+                    [
+                        "store",
+                        "report/FastQC_Sections/{iterator/0/name}",
+                        "tmp/fqbase"
+                    ],
+                    [
+                        "store",
+                        "iterator/0/state",
+                        "{fqbase}/state"
+                    ],
+                    ["if", ["not", ["sequenceIncludes", ["basicStatistics", "overrepresentedSequences"], "iterator/0/name"]], 
+                        ["append",
+                            [
+                                "importTabular",
+                                "iterator/0/value",
+                                "camelCase",
+                                ["iif","iterator/0/name", "==", "sequenceDuplicationLevels", 1, 0]
+                            ],
+                            "{fqbase}/table"
+                        ]
+                    ],
+                    ["if", "iterator/0/name", "==", "basicStatistics", 
+                        [
+                            "store",
+                            [
+                                "regexp",
+                                "iterator/0/value",
+                                "\"\\n(?!#)(?P<name>[^\\t]+)\\t(?P<value>[^\\t]+)\"",
+                                "camelCase"
+                            ],
+                            "{fqbase}/{name}"
+                        ]
+                    ],
+                    ["if", "iterator/0/name","==","sequenceDuplicationLevels",
+                        [
+                            "store",
+                            [
+                                "regexp",
+                                "iterator/0/value",
+                                "\"(?P<name>#Total Duplicate Percentage)\\t(?P<value>[^\\t\\n]+)\"",
+                                "camelCase"
+                            ],
+                            "{fqbase}/{name}"
+                        ]
+                    ]
+                ],
+              
+                [
+                    "writeFile",
+                    [
+                        "pageHtml",
+                        [
+                            "getHtml",
+                            "report"
+                        ],
+                        "\"My Report Widget\""
+                    ],
+                    "report.html"
+                ]
+            ]
+        }
+    ]
+}

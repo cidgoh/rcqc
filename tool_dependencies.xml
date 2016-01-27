@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <tool_dependency>
-	<package name="report_calc" version="0.1.0">
+	<package name="rcqc" version="0.1.0">
 		<install version="1.0">
 			<actions>
 				<action type="setup_python_environment">
@@ -10,8 +10,8 @@
 			</actions>
 		</install>
 		<readme><![CDATA[
-Report Calc
------------
+Report Calc for Quality Control
+-------------------------------
 
 A python tool to text-mine log and other text files for variables and tabular data, and to create custom reports for this data, as well as triggering workflow halt based on quality control thresholds.  This tool requires the following additional python packages.
 
