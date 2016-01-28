@@ -68,7 +68,7 @@ class RCQCInterpreter(object):
 		# namespace includes variables and rules
 		self.namespace = {} # Will be hash list of input files of whatever textual content
 		self.namespace['report'] = {}
-		self.namespace['report']['title'] = "Galaxy Report Calc"			
+		self.namespace['report']['title'] = "Report Calc for Quality Control"			
 		self.namespace['report']['tool_version'] = CODE_VERSION	
 		self.namespace['report']['job'] = {'status': 'ok'}
 		self.namespace['report']['quality_control'] =  {'status': 'ok'}
@@ -970,11 +970,9 @@ class RCQCInterpreter(object):
 		*************************** Parse Command Line *****************************
 		"""
 		parser = MyParser(
-			description = 'Records selected input text file fields into a report (json format), and optionally applies tests to them to generate a pass/warn/fail status. Program can be set to throw an exception based on fail states.',
-			usage = 'report_calc.py [ruleSet file] [input files] [options]*',
+			description = 'Report Calc for Quality Control (RCQC) is an interpreter for the RCQC scripting language for text-mining log and data files to create reports and to control workflow within a workflow engine. It works as a python command line tool and also as a Galaxy bioinformatics platform tool.  See https://github.com/Public-Health-Bioinformatics/rcqc',
+			usage = 'rcqc.py [options]*',
 			epilog="""
-        USAGE
-        
         """)
 		
 		# Standard code version identifier.
