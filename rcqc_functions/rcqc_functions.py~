@@ -89,7 +89,7 @@ class RCQCStaticFnExtension(object):
 				formating['trSuffix'] = '</td></tr>'
 				
 			return """
-%(tabs)s%(trPrefix)s<table class="ReportCalc depth_%(depth)s">
+%(tabs)s%(trPrefix)s<table class="RCQC depth_%(depth)s">
 %(tabs)s	<caption>%(title)s</caption>
 %(tabs)s	<thead>%(trHead)s</thead>
 %(tabs)s	<tbody>%(content)s</tbody>
@@ -303,22 +303,22 @@ class RCQCStaticFnExtension(object):
 		<title>%s</title>
 		<style>
 			body {font:1rem arial}
-			table.ReportCalc {border:1px solid silver; min-width:300px; border-collapse: collapse;
+			table.RCQC {border:1px solid silver; min-width:300px; border-collapse: collapse;
 				display:inline-block;}
-			table.ReportCalc td {padding:3px 3px 3px 5px}
-			table.ReportCalc table td {padding-left:25px}
-			table.ReportCalc td.numeric {text-align:right}
-			table.ReportCalc caption {background-color: #BBB; display:block;
+			table.RCQC td {padding:3px 3px 3px 5px}
+			table.RCQC table td {padding-left:25px}
+			table.RCQC td.numeric {text-align:right}
+			table.RCQC caption {background-color: #BBB; display:block;
 				text-align:left; padding:3px 3px 3px 5px; cursor:pointer;}
 
-			table.ReportCalc tr td {border-bottom:1px solid silver}
+			table.RCQC tr td {border-bottom:1px solid silver}
 			table.depth_0 caption {background-color: #EEE; font-size:1.3rem}
 			table.depth_1 caption {background-color: #DDD; font-size:1.2rem}
 			table.depth_2 caption {background-color: #CCC; font-size:1.1rem}
 
 			@media screen {
-				table.ReportCalc.depth_1 table {max-height:1.7rem;	display:block;overflow-y:scroll;}
-				table.ReportCalc.depth_1 *:hover > table  {
+				table.RCQC.depth_1 table {max-height:1.7rem;	display:block;overflow-y:scroll;}
+				table.RCQC.depth_1 *:hover > table  {
 				    -webkit-animation-name: example; /* Chrome, Safari, Opera */
 				    -webkit-animation-duration: 3s; /* Chrome, Safari, Opera */
 				    -webkit-animation-fill-mode: forwards; /* Chrome, Safari, Opera */
@@ -526,7 +526,7 @@ class RCQCStaticFnExtension(object):
 				startPtr == -1
 
 
-######################### FUNCTION EXTENSIONS THAT NEED ReportCalc SELF #######################
+######################### FUNCTION EXTENSIONS THAT NEED RCQC SELF #######################
 class RCQCClassFnExtension(object):
 	"""
 	These functions DO need access to the RC engine's methods or current namespace via self.callerInstance instance.

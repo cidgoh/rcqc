@@ -68,7 +68,7 @@ class RCQCInterpreter(object):
 		# namespace includes variables and rules
 		self.namespace = {} # Will be hash list of input files of whatever textual content
 		self.namespace['report'] = {}
-		self.namespace['report']['title'] = "Report Calc for Quality Control"			
+		self.namespace['report']['title'] = "RCQC Quality Control Report"			
 		self.namespace['report']['tool_version'] = CODE_VERSION	
 		self.namespace['report']['job'] = {'status': 'ok'}
 		self.namespace['report']['quality_control'] =  {'status': 'ok'}
@@ -659,8 +659,19 @@ class RCQCInterpreter(object):
 			#with open(self.options.custom_rules,'r') as rules_handle: print  rules_handle.read()
 			
 			with open(self.options.custom_rules,'r') as rules_handle:
-				# Will throw ValueError if % isn't escaped
-				self.custom_rules = json.load(rules_handle)
+				lines = rules_handle.readlines()
+			
+			self.custom_rules = []
+			for line in lines:
+				print line
+				linesplit = line.strip().split('\t',2) # remaining tabs are within rule content
+				if len(linesplit) == 3:
+					(row,drop,rules) = linesplit 
+					self.custom_rules.append({
+						'row':row,
+						'drop': 0 if drop == 'False' else int(drop),
+						'rules': rules.decode('base64')
+					})
 			
 			# Using this to convert "f1 (a f2 (c d))" into python nested array [f1 [a,  f2 [c, d]]]
 			# Could be improved to handle dissemble() fn too.
@@ -972,8 +983,7 @@ class RCQCInterpreter(object):
 		parser = MyParser(
 			description = 'Report Calc for Quality Control (RCQC) is an interpreter for the RCQC scripting language for text-mining log and data files to create reports and to control workflow within a workflow engine. It works as a python command line tool and also as a Galaxy bioinformatics platform tool.  See https://github.com/Public-Health-Bioinformatics/rcqc',
 			usage = 'rcqc.py [options]*',
-			epilog="""
-        """)
+			epilog=""" """)
 		
 		# Standard code version identifier.
 		parser.add_option('-v', '--version', dest='code_version', default=False,

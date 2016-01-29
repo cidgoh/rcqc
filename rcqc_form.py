@@ -13,7 +13,7 @@ import rcqc
 from rcqc_functions.rcqc_functions import RCQCClassFnExtension
 from rcqc_functions.rcqc_functions import RCQCStaticFnExtension
 
-DEBUG = 1
+DEBUG = 0
 
 with open( self_dir + '/log.txt', 'w') as log_handle:
 	log_handle.write( "Starting ...\n")

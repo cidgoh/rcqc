@@ -63,18 +63,13 @@
 		
     </inputs>
     
-    <configfiles>
-		<configfile name="custom_rules">	[
-	#set $sep3 = ''
-	#for $rule_choice in $custom
-	$sep3{"row": "$rule_choice.rule_position",
-	 "drop": $rule_choice.drop_rule,
-	 "rules": "$rule_choice.rules.replace(r'"',r'\"').replace('\n',r'\n').replace('\t',r'\t')"
-	}
-	#set $sep3 = ', '
-	#end for 
-]
-		</configfile>
+	<configfiles>
+		<!-- Rule file contains [section name]:[row]\t[0|1]\t[plain text rules]  #replace(r'"',r'\"').replace('\n',r'\n') -->
+		<configfile name="custom_rules">#
+#for $rule_choice in $custom
+$rule_choice.rule_position	$rule_choice.drop_rule	$rule_choice.rules.encode('base64').replace('\n','')
+#end for 
+</configfile>
 	</configfiles>
 
     <outputs>
