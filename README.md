@@ -1,7 +1,7 @@
 # rcqc
 Report Calc for Quality Control (RCQC) is an interpreter for the RCQC scripting language for text-mining log and data files to create reports and to control workflow within a workflow engine.  It works as a python command line tool and also as a Galaxy bioinformatics platform tool.
 
-See the [wiki](wiki) for extensive documentation.  Here is the command line summary:
+See the [wiki](https://github.com/Public-Health-Bioinformatics/rcqc/wiki) for extensive documentation.  Here is the command line summary:
 
 ```
 Usage: rcqc.py [ruleSet file] [input files] [options]*
