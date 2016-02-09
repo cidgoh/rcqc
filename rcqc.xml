@@ -48,7 +48,7 @@
 		
 		<repeat name="custom" title="Modify rule section" >
 			
-			<param name="rule_position" type="select" label="At rule" dynamic_options="get_rule_list()" multiple="false"  />
+			<param name="rule_position" type="select" label="At rule" dynamic_options="get_rule_list()" multiple="false" optional="True"  />
 
 			<param name="drop_rule" type="boolean" label="Drop this rule" truevalue="1" falsevalue="0"/>
 			<param name="rules" type="text" area="True" size="5x50" label="Add rule(s) in format: function (parameter1 parameter2 ...) ..." />
@@ -74,10 +74,10 @@ $rule_choice.rule_position	$rule_choice.drop_rule	$rule_choice.rules.encode('bas
 
     <outputs>
 		<data format="html" name="html_file" label="rcqc_folder"/>
-		<data name="output_json_file" format="json" label="rcqc_calc_json">
+		<data name="output_json_file" format="json" label="rcqc_json">
 			<filter>(output_json == True)</filter>
 		</data>
-		<data name="save_rule_file" format="json" label="rcqc_rule_file">
+		<data name="save_rule_file" format="json" label="rcqc_ruleset">
 			<filter>(save_rules == True)</filter>
 		</data>    	
     </outputs>
@@ -88,11 +88,11 @@ $rule_choice.rule_position	$rule_choice.drop_rule	$rule_choice.rules.encode('bas
 ===============================
 Report Calc for Quality Control
 ===============================
-Report Calc for Quality Control (RCQC) is basically an interpreted scripting language that can text-mine documents for field labels and values, and can execute rules that manipulate these values in its memory resident data store in order to create reports and to control job execution flow within a workflow engine. It provides basic tab-delimited, JSON and HTML reporting of any portion of its data store.  RCQC liaises with the overarching workflow engine via its own exit codes. The design goal is to allow easy adjustment of rules and parameters that affect workflow processing.
+Report Calc for Quality Control (RCQC) is basically a scripting language interpreter that can text-mine documents for field labels and values, and can execute rules that manipulate these values in its memory resident data store in order to create reports and to control job execution flow within a workflow engine. It provides basic tab-delimited, JSON and HTML reporting of any portion of its data store.  RCQC liaises with the overarching workflow engine via its own exit codes. The design goal is to allow easy adjustment of rules and parameters that affect workflow processing.
 
-Rules can locate and parse numeric, boolean and other data from the input files which can be in text, tabular and JSON format.  Each rule is expressed as a function followed by parameters, where each parameter can also be a function with parameters.  The rule file itself is coded in JSON in infix notation as rules of form "function(parameter1 parameter2 ...).  Rules are executed from top to bottom. 
+RCQC Rules can locate and parse numeric, boolean and other data from the input files which can be in text, tabular and JSON format.  Each rule is expressed as a function followed by parameters, where each parameter can also be a function with parameters, e.g. "functionA(parameter1 parameter2 functionB(parameter3 ...) )". Rules are executed from top to bottom. Behind the scenes rules are actually translated into JSON format. 
 
-If after all the rules have processed, a rule has set a namespace variable called **"report/job/status"** to **"fail"**, that will cause a tool exit code of 1 to be returned to Galaxy after the report is written.  This enables a job to be marked in an error state as a result of quality control reporting. (Currently however one cannot make other workflow apps conditional on earlier Report Calc success, so one cannot stop other parts of a workflow early.)
+If after all the rules have processed, a namespace variable called **"report/job/status"** has been set to **"fail"**, that will cause an exit code of 1 to be returned to Galaxy after the report is written.  This enables a job to be marked in an error state as a result of quality control reporting. (Currently however one cannot make other workflow apps conditional on earlier Report Calc success, so one cannot stop other parts of a workflow early.)
 
 More details on the RCQC language and interpreter are available at https://github.com/public-health-bioinformatics/rcqc/wiki
 

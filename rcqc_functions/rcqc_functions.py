@@ -6,7 +6,11 @@ import os.path
 import datetime
 import collections
 import dateutil.parser as dateparser
-
+try:
+    from collections import OrderedDict
+except ImportError:
+    from ordereddict import OrderedDict
+    
 # http://stackoverflow.com/questions/4473184/unbound-method-f-must-be-called-with-fibo-instance-as-first-argument-got-cla
 DEBUG = 0
 
@@ -69,8 +73,7 @@ class RCQCStaticFnExtension(object):
 			else: # list here.
 				# If every item has the same dictionary keys then show it as a table.
 				if RCQCStaticFnExtension.__isTable__(content):
-					# Sorts keys so row# is first
-					keys = sorted(content[0].keys(), key=lambda(text): str(text!='ROW_NUM')+text )
+					keys = content[0].keys()
 					formating['trHead'] = '<tr><td>' +'</td><td>'.join( keys ) + '</td></tr>\n'
 					formating['content'] = ''
 					for (ptr, myDict) in enumerate(content):
@@ -179,28 +182,29 @@ class RCQCStaticFnExtension(object):
 
 
 	@staticmethod
-	def nameCamelCase(string, default='no_label'):
+	def nameCamelCase(myString, default='no_label'):
 		"""
 		nameCamelCase(st) -- Returns camel case version of given string.
 		"""
-		output = ''.join(x for x in string.title().strip() if x.isalpha())
+		myString = myString.replace('#','_count_').replace("+",'_plus_').replace('%','_percent_')
+		output = ''.join(x for x in myString.title().strip() if x.isalnum())
 		try:
 			return output[0].lower() + output[1:]
 		except IndexError as e:
-			print 'Unable to convert "%s" to camelCase.' % string
-			#raise IndexError('Unable to convert "%s" to camelCase.' % string)
-			if len(string) > 0:
-				return string
+			print 'Unable to convert "%s" to camelCase.' % myString
+			if len(myString) > 0:
+				return myString
 			else:
 				return default
 		 
 		
 	@staticmethod
-	def nameUnderScore(string, default='no_label'):
+	def nameUnderScore(myString, default='no_label'):
 		"""
 		nameUnderScore(string) -- Returns lowercase version of given string, with spaces replaced by underscore.
 		"""	
-		output = ''.join(x for x in string.lower() if x.isalpha() or x in ' _').replace(' ','_')
+		myString = myString.lower().replace('#','_count_').replace("+",'_plus_').replace('%','_percent_')
+		output = ''.join(x for x in myString if x.isalnum() or x in ' _').replace(' ','_')
 		if len(output): return output
 		else: return default
   
@@ -237,7 +241,64 @@ class RCQCStaticFnExtension(object):
 			except ValueError:
 				return myValue #remains string
 			
-			
+		
+	@staticmethod
+	def parseFixedWidth(myText):
+		"""
+		parseFixedWidth(text) -- Convert a text file with fixed-width columnar data into tabular text, so it can be processed by getTabular()
+		- Assumes any lines that have no spaces in them can be skipped.
+		- Also assumes that header labels are sparated by at least two spaces.
+		# FUTURE: Allow for skipping lines by comment character
+		# Issue, can't iterate this in one pass because need to identify columns first.
+		"""
+		spaces = []
+		output = []
+		header = None
+		linecount = 0
+		maxlen = 0
+		for line in myText.split('\n'):
+			if line.strip().find(' ') >= 0: #If line has at least one meaningful space delimiter
+				linecount += 1
+				if len(line) > maxlen: 
+					maxlen = len(line)
+
+				if linecount < 3:	
+					if linecount ==1:
+						header = line
+					if linecount == 2: # past header, and into real data. #get real data/header line length here:
+						spaces = [column for column, char in enumerate(line) if char == ' ']
+					continue
+				
+				for column in reversed(spaces):
+					if line[column] != ' ': spaces.remove(column) 
+
+		# Consolidate consecutive space columns into first one.
+		for column in reversed(spaces):
+			if column - 1 in spaces:
+				spaces.remove(column)
+		
+		for ptr, column in enumerate(spaces):
+			column1 = header.find('  ',column)
+			if column1 > -1:
+				spaces[ptr] = column1
+		
+		# Ensure 1st column is 0 (data could start immediately)
+		if spaces[0] != 0: spaces.insert(0,0)
+		# Ensure last column is end of line column
+		if not maxlen-1 in spaces: spaces += [maxlen-1]
+		
+		# Spaces[] now has column boundaries.
+		for line in myText.split('\n'):
+			if line.strip().find(' ') >= 0: # skip cosmetic lines again.
+				lineout = []
+				for ptr,column in enumerate(spaces[1 : ]):
+					lineout.append(line[spaces[ptr] : column].strip() )
+	
+				output += ['\t'.join(lineout)]
+		
+		return output
+				
+		
 	@staticmethod
 	def parseDate(adate):
 		"""
@@ -261,7 +322,7 @@ class RCQCStaticFnExtension(object):
 			Future: enhance with other python sorted() attributes?
 		"""      
 		for item in sorted(alist):
-			yield {'value': item}		# Add ROW_NUM too?
+			yield {'value': item}		# Add ROW too?
 		
 		
 	@staticmethod
@@ -269,6 +330,7 @@ class RCQCStaticFnExtension(object):
 		"""
 		statisticN(numeric_array, split=50) -- By default, the N50 value of the passed array of numbers. 
 		Based on the Broad Institute definition: https://www.broad.harvard.edu/crd/wiki/index.php/N50
+		Added return of integer rather than float.
 		"""
 		if DEBUG: print numlist
 		try:
@@ -286,12 +348,20 @@ class RCQCStaticFnExtension(object):
 		# of elements.  otherwise, take the middle element
 		if len(newlist) % 2 == 0:
 			medianpos = len(newlist)/2  
-			return float(newlist[medianpos] + newlist[medianpos-1]) /splitN
+			return int( float(newlist[medianpos] + newlist[medianpos-1]) /splitN) 
 		else:
 			medianpos = len(newlist)/splitN
 			return newlist[medianpos]
-			
-			
+	
+	
+	@staticmethod
+	def parseInt(value):
+		"""
+		parseInt(number) -- Convert number into an integer
+		"""
+		return int(value)
+	
+	
 	@staticmethod
 	def pageHtml(html_content, title="Data"):
 		"""
@@ -358,8 +428,7 @@ class RCQCStaticFnExtension(object):
 		"""
 		regexp(text regular_expression, clean_name=False) -- Apply python regular expression to text.  Use named groups (?P<value>...) to return result dictionary.  For optional (?P<name>...), clean_name=True on "A BC" yeilds "a_bc"; clean_name=camelCase yeilds "aBc".
 		
-		DICT_ROW is a named group containing integer index of current match row 
-	 	MAKE parseDataType optional?
+		ROW is integer index of current match row 
 		"""
 		if not hasattr(subjects, '__iter__'):
 			subjects = [subjects]
@@ -380,10 +449,9 @@ class RCQCStaticFnExtension(object):
 			for ptr, myNextItem in enumerate(regexResult):
 				
 				myDict = myNextItem.groupdict()
+				myDict['ROW'] = ptr
 				if clean_name != False and 'name' in myDict:
 					myDict['name'] =  RCQCStaticFnExtension.nameCamelCase(myDict['name']) if clean_name == 'camelCase' else RCQCStaticFnExtension.nameUnderScore(myDict['name'])
-					#print "Set name", myDict['name']
-				myDict['DICT_ROW'] = ptr
 				if 'value' in myDict:
 					myDict['value'] = RCQCStaticFnExtension.parseDataType(myDict['value'])
 				else:
@@ -397,7 +465,7 @@ class RCQCStaticFnExtension(object):
 		"""
 		readFileCollection(file_collection) -- return contents of each file in collection line by line.
 		NOTE: This can read files from list user has specified, so system files that galaxy has permission to read.
-		DICT_ROW is current line being read by iterable.
+		ROW is current line being read by iterable.
 		"""
 		for myFile in file_collection:
 			counter = -1
@@ -405,7 +473,7 @@ class RCQCStaticFnExtension(object):
 				counter = counter + 1
 				yield {
 					'value': input_file_handle.read(),
-					'DICT_ROW': counter, 
+					'ROW': counter, 
 					'name': myFile['file_name'] 
 				}
 			
@@ -442,7 +510,7 @@ class RCQCStaticFnExtension(object):
 	@staticmethod	
 	def importTabular(content, clean_name=False, skip_rows=0, tableHeader=None): 
 		"""
-		importTabular(content, clean_name=False|camelCase|underScore(default)) -- Converts content - carriage delimited text row data - into a dictionary.
+		importTabular(content, clean_name=False|camelCase|underScore(default)) -- Converts content - carriage delimited text tabular row data - into a list of dictionary.
 		ALLOW USER TO PROVIDE OWN COLUMN NAMES as comma-delimited string?
 		Strange Error: Used "header=[]" but this seemed to create a global "header" variable that was set on first use.
 		"""
@@ -484,17 +552,12 @@ class RCQCStaticFnExtension(object):
 							if DEBUG > 0: 	print "Found column: ", tableHeader[-1]
 					
 					else:
-						dict = {}
+						myDict = OrderedDict()
+						myDict['ROW'] = row - 1 - skip_rows # Subtract 1 if there is a header line.
 						columnData = line.split('\t')
 						for (column, item) in enumerate(tableHeader):
-							dict[item] = RCQCStaticFnExtension.parseDataType( columnData[column] )
-						dict['ROW_NUM'] = row - 1 - skip_rows # Subtract 1 if there is a header line.
-						yield dict
-
-			#else:
-			#	raise ValueError ("importTabular() didn't receive iterable items of text for input.")
-
-
+							myDict[item] = RCQCStaticFnExtension.parseDataType( columnData[column] )
+						yield myDict
 
 	@staticmethod
 	def format(myFormatString, dictOrValues):
@@ -572,9 +635,10 @@ class RCQCClassFnExtension(object):
 			return expression
 		
 		
-	def iterate(self, iterator, *functions):
+	def iterate(self, iterator, location, *functions):
 		"""
-		iterate (iterator fn1 ... fn2 etc.) -- Iterate through iterator's dictionary, storing it in iterator/[fn depth]/, and then executing each function expression. 
+		iterate (iterator location fn1 ... fn2 etc.) -- Iterate through iterator's dictionary, storing it in location, and then executing each function expression. 
+		Iterator dictionary is also available in iterator/[fn depth]/
 		"""
 		# Catch non-iterables
 		if not (hasattr(iterator, '__iter__') or isinstance(iterator, (dict, list)) ):
@@ -588,6 +652,12 @@ class RCQCClassFnExtension(object):
 		for myDict in iterator:
 			found = found + 1
 			self.callerInstance.namespace['iterator'][fnDepth] = myDict
+			if isinstance(location, basestring): # It should always be this.
+				location2 = self.callerInstance.namespaceSearchReplace(location)
+				(obj, key) = self.callerInstance.getNamespace(location2)
+				obj[key] = myDict
+				self.callerInstance.namespace['name_index'][key] = obj  #abbreviated name
+			
 			if DEBUG > 0: print 'Iterator/%s:' % fnDepth, self.callerInstance.namespace['iterator'][fnDepth], functions
 			self.callerInstance.evaluateAuxFunctions(functions)
 
@@ -656,7 +726,7 @@ class RCQCClassFnExtension(object):
 					data = input_file_handle.read()
 	
 				print "Loaded %s: %s characters" % (myFile['file_name'], len(data) )
-				yield {'value': data , 'DICT_ROW': ptr, 'name': myFile['file_name'] }
+				yield {'value': data , 'ROW': ptr, 'name': myFile['file_name'] }
 				ptr = ptr + 1
 
 
@@ -671,7 +741,7 @@ class RCQCClassFnExtension(object):
 			with open(myFile['file_path'],'r') as file_handle:
 				found = True
 				for ptr,line in enumerate(file_handle):
-					yield {'value': line.strip('\n') , 'DICT_ROW': ptr, 'name': myFile['file_name'] }
+					yield {'value': line.strip('\n') , 'ROW': ptr, 'name': myFile['file_name'] }
 
 
 	def writeJsonFile(self, content, output_file_name):

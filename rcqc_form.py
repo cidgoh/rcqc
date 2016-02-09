@@ -73,22 +73,23 @@ def get_rule_list():
 	if rulesets:
 		for section in rulesets:
 			section_name = section['name']
-			for (ptr2, rule) in enumerate(section['rules']):
-				if len(rule):
+			if 'rules' in section:
+				for (ptr2, rule) in enumerate(section['rules']):
+					if len(rule):
 			
-					try:
-						ruleString = section_name + ': ' + str(ptr2) + ': ' + ruleFormat(rule)
-						# Any html tag ends need replacing, and limit thing to 100 characters.
-						# ARCHAIC? ruleString = ruleString.replace('<','&lt;').replace('>','&gt;')
-						# ruleString = ruleString[:140] # cap it at 140 characters.
-						# if len(ruleString) == 140: ruleString = ruleString + '...'
-						items.append( [ ruleString, section_name + ":" + str(ptr2), False ])	
+						try:
+							ruleString = section_name + ': ' + str(ptr2) + ': ' + ruleFormat(rule)
+							# Any html tag ends need replacing, and limit thing to 100 characters.
+							# ARCHAIC? ruleString = ruleString.replace('<','&lt;').replace('>','&gt;')
+							# ruleString = ruleString[:140] # cap it at 140 characters.
+							# if len(ruleString) == 140: ruleString = ruleString + '...'
+							items.append( [ ruleString, section_name + ":" + str(ptr2), False ])	
 
-					except Exception,e: 
-						log("\nError: " + str(e) + '\n Rule: ' + str(rule) )
+						except Exception,e: 
+							log("\nError: " + str(e) + '\n Rule: ' + str(rule) )
 
 	if len(items) == 0:
-		section_name = 'processing:None'
+		section_name = 'Processing:None'
 		items= [ [section_name + ' - new rule ...', section_name, True] ]
 	
 	return items

@@ -12,6 +12,11 @@ import pyparsing
 import re
 import sys
 
+try:
+    from collections import OrderedDict
+except ImportError:
+    from ordereddict import OrderedDict
+    
 # These three classes, plus self.functions below, provide all of the functions available in rules to massage report data
 from rcqc_functions.rcqc_functions import RCQCClassFnExtension
 from rcqc_functions.rcqc_functions import RCQCStaticFnExtension
@@ -67,7 +72,7 @@ class RCQCInterpreter(object):
 		
 		# namespace includes variables and rules
 		self.namespace = {} # Will be hash list of input files of whatever textual content
-		self.namespace['report'] = {}
+		self.namespace['report'] = OrderedDict()
 		self.namespace['report']['title'] = "RCQC Quality Control Report"			
 		self.namespace['report']['tool_version'] = CODE_VERSION	
 		self.namespace['report']['job'] = {'status': 'ok'}
@@ -152,7 +157,7 @@ class RCQCInterpreter(object):
 		"""
 		exit(exit_code = 0) -- Stops processing ruleset immediately and exits with given code.  It will finish composing and saving report files first.
 		"""
-		location = 'report/job'
+		location = 'job'
 		
 		if self.options.output_json_file:
 			self.writeJSONReport(self.options.output_json_file)		
@@ -160,49 +165,59 @@ class RCQCInterpreter(object):
 			self.writeHTMLReport('Report Summary')
 			
 		if exit_code == 1:
-			self.storeNamespaceValue("FAIL", location + '/status')
+			self.storeNamespaceValue("FAIL", 'report/job/status')
 		if exit_code == 2:
-			self.storeNamespaceValue("RETRY", location + '/status')
-			
+			self.storeNamespaceValue("RETRY",  'report/job/status')
+		
 		# Failure trigger if report/job/status == "FAIL"
-		if 'job' in self.namespace['report'] and 'status' in self.namespace['report']['job']:
-			status = self.namespace['report']['job']['status'].lower()
-			if status == 'fail':
-				exit_code = 1
-				message = 'This job quality report triggered a workflow fail signal!'
-			elif status == 'retry':
-				exit_code = 2
-				message = 'This job quality report triggered a workflow retry signal!'
+		#if not  'job' in self.namespace['report']: self.namespace['report']['job']={'status':'ok'}
+		#if not 'status' in self.namespace['report']['job']: self.namespace['report']['job']['status']='ok'
+		status = self.namespace['report']['job']['status'].lower()
+		if status == 'fail':
+			exit_code = 1
+			message = 'This job quality report triggered a workflow fail signal!'
+		elif status == 'retry':
+			exit_code = 2
+			message = 'This job quality report triggered a workflow retry signal!'
 
-		if message > '':
-			self.storeNamespaceValue(message, location + '/message')	
-					
+		self.messageAppend(message, location)					
 		stop_err(message, exit_code)
 
 	
-	def fail(self, location = 'report/job', message = ''):
+	def fail(self, location = 'job', message = ''):
 		"""
 		fail(location=report/job, message='') -- sets value of location/status to "FAIL" (and continues rule processing) .  Short for store(FAIL, location).  Adds optional message.  If location is report/job, this will fail it.
 		"""
-		if location == 'report/job/status': location = 'report/job'
-		self.storeNamespaceValue("FAIL", location + '/status')
-		if message > '':		
-			self.storeNamespaceValue(message, location + '/message')	
+		if location != 'job':
+			location = 'quality_control'
+			
+		self.storeNamespaceValue("FAIL",'report/%s/status' % location)
+		self.messageAppend(message, location)
+			
+	def messageAppend(self, message=None, location='job'):
+		"""
+		given message is appended to list of exit/fail messages.  By default in report/job/message, but could be quality_control/ too.
+		"""
+		if message:	
+			if not 'message' in self.namespace['report'][location]:	
+				self.namespace['report'][location]['message'] = []
+			self.namespace['report'][location]['message'].append(message)
 
-
+			
 	def applyRules(self, execute_sections):
 		"""
 		Now apply each rule.  A rule consists of one or more functions followed by parameters.
-		Currently a function having optional parameters is not allowed.
+		NOTE: Ordering of execute_sections doesn't matter.  Execution order depends on rulesets order.
 		"""
 		if DEBUG > 0: print self.namespace['rulesets']
 		
 		for section in self.namespace['rulesets']:
 			if section['name'] in execute_sections:
-				for (row, myRule) in enumerate(section['rules']):
-					self.rule_row = row
-					self.function_stack = []
-					self.evaluateFn(list(myRule)) # Whatever rules might return isn't used.
+				if 'rules' in section:
+					for (row, myRule) in enumerate(section['rules']):
+						self.rule_row = row
+						self.function_stack = []
+						self.evaluateFn(list(myRule)) # Whatever rules might return isn't used.
 
 
 	def evaluateFn(self, myList):
@@ -235,21 +250,6 @@ class RCQCInterpreter(object):
 			if childFn:
 				return self.executeFunction(childFn, myList)
 		
-		"""
-		# Works, but best positioned in rule parser, 2nd pass after rules saved.
-		if len(myList) > 2:
-			myList = self.infixToPrefix(myList)
-			if len(myList) == 1 and isinstance(myList[0], list):
-				myList = myList[0]
-			term = myList[0] 
-			#print myList
-			if isinstance(term, basestring): # Possibly this is a function
-				childFn = self.matchFunction(term)
-				#print "Found infix", term, myList
-				if childFn:
-					return self.executeFunction(childFn, myList)
-		"""
-		
 		# Nothing to evaluate, so just return this verbatim.
 		print "RETURNING (no function): ", myList
 		return myList
@@ -261,7 +261,7 @@ class RCQCInterpreter(object):
 		self.function_stack.append(childFn) #Save so subordinate functions have access to their caller
 		# Parameter is a function so evaluate it.  Could get a constant , dict or iterable back.
 		try:
-		#if True:
+			#if True:
 			fnObj = self.evaluateParams( childFn, myList[1:])
 
 			# Finally execute function on arguments.	
@@ -282,7 +282,7 @@ class RCQCInterpreter(object):
 
 		#An "iterator is not subscriptable" error will occur if program tries to reference namespace/iterator/x where x doesn't exist.
 		# Error handling notes:https://doughellmann.com/blog/2009/06/19/python-exception-handling-techniques/
-
+			#"""
 		except AttributeError as e: result = None; self.ruleError(e)
 		except TypeError as e: result = None; self.ruleError(e)
 		except IOError as e: 
@@ -294,14 +294,14 @@ class RCQCInterpreter(object):
 		except NameError as e: result = None; self.ruleError(e)
 
 		except SystemExit as e: result = None; sys.tracebacklimit = 0
-
+			
 		except Exception as e: # includes  SystemExit
 			self.ruleError(e)
 			stop_err( 'Halting program' )
 		
 		finally: 
-		
-		#if True:					
+			#"""
+			#if True:					
 			self.function_stack.pop()
 			return result
 
@@ -544,12 +544,12 @@ class RCQCInterpreter(object):
 		(obj, key) = self.getNamespace(location) 
 
 		# This catches case where valueObj is not an iterable.  It is a simple string, number, or boolean.
-		if not (hasattr(valueObj, '__iter__') or isinstance( valueObj, (dict, list) ) ):
+		if not (hasattr(valueObj, '__iter__')): #  or isinstance( valueObj, (dict, list) ) 
 			if DEBUG > 0: print "store(..., %s) = %s" % (location, valueObj)		
 			obj[key] = valueObj
 			self.evaluateAuxFunctions(auxFunctions)
 			return True
-
+		
 		# Handle iterable functions from here on.
 		found = False
 		if '%(' in key: 
@@ -569,8 +569,14 @@ class RCQCInterpreter(object):
 				obj[key] = myDict['value']
 				self.namespace['iterator'][fnDepth] = myDict
 				self.evaluateAuxFunctions(auxFunctions)
-				
-		else: # Save all rows as array to single entry.  Note, final location doesn't see iterations?
+		
+		# Here we have a dictionary or list or iterable.
+		# Save all rows as array to single entry.  Note, final location doesn't see iterations?
+		elif isinstance( valueObj, (dict,list) ) :
+			obj[key] = valueObj
+			found = True
+		else:
+		#if True:
 			myResultArray = [] 
 
 			for myDict in valueObj: 
@@ -582,13 +588,14 @@ class RCQCInterpreter(object):
 					myResultArray.append(myDict['value'])
 				else: #source no longer has 'value' if it is a copy from some other data structure in namespace
 					raise ValueError ('store() needs given dictionary to have a \'value\' key.  If derived from a regular expression search, did it have a "(?P<value>...)" named group?')
-					
+				
 			if asArray==True or len(myResultArray) > 1:
 				obj[key] = myResultArray
 			elif len(myResultArray) == 1: 
 				obj[key] = myResultArray[0]
-
-			if DEBUG > 0: print "Set single entry (%s) /%s" % (location, key)
+				
+		
+			#if DEBUG > 0: print "Set single entry (%s) /%s" % (location, key)
 
 
 		# There is no way to see if an iterable has content without starting to execute it.  So we have to check  for emptiness via a flag.
@@ -612,7 +619,7 @@ class RCQCInterpreter(object):
 		# Note: this might conflict with dictionary terms.  It is up to programmer to avoid namespace vs dictionary term confusion (e.g. "value" or "name" used as variables and dictionary keys).  Or we add distinguishing mark for dictionary lookup.
 
 		locationPath = re.split('({[^{}]+})', location)
-		print "S&R:" , locationPath
+		if DEBUG > 0: print "S&R:" , locationPath
 		for ptr, phrase in enumerate(locationPath):
 			if len(phrase) > 0 and phrase[0] == '{' and phrase[-1] == '}':
 				reference = phrase[1:-1]
@@ -645,11 +652,11 @@ class RCQCInterpreter(object):
 			# Provides a default empty ruleset to add customized rules to.
 			rulefileobj = {
 				'rulesets':[{
-					'name':'processing',
-					'rules':[]
+					'name': 'Processing',
+					'rules': []
 				}]
 			}
-			self.execute = ['processing']
+			self.execute = ['Processing']
 			
 		self.namespace['rulesets'] = rulefileobj['rulesets']
 
@@ -742,9 +749,10 @@ class RCQCInterpreter(object):
 		# TESTING: INFIX OPERATORS
 		# Now, since they're saved, go back over rules and convert any infix expressions to prefix
 		for rule_section in self.namespace['rulesets']:
-			for (ptr, rule) in enumerate(rule_section['rules']):
-				rule_section['rules'][ptr] = self.infixToPrefixRewrite(rule)
-				#print rule_section['rules'][ptr] 
+			if 'rules' in rule_section:
+				for (ptr, rule) in enumerate(rule_section['rules']):
+					rule_section['rules'][ptr] = self.infixToPrefixRewrite(rule)
+					#print rule_section['rules'][ptr] 
 
 	def infixToPrefixRewrite(self, rule): # given rule is always an array
 		"""
@@ -858,8 +866,10 @@ class RCQCInterpreter(object):
 		writeReport(output_json_file=None)
 		Write out report file - i.e. anything within namespace['report']
 		default=lambda: "[nasty iterable]" provides warning string for any objects left in report at this stage.  Shouldn't be any.
+		
+		We don't sort the keys because some dictionaries are ORDERED for display, and others aren't.
 		"""
-		report = json.dumps(self.namespace['report'], sort_keys=True, indent=4, separators=(',', ': '), default=lambda: "[nasty iterable]")
+		report = json.dumps(self.namespace['report'], sort_keys=False, indent=4, separators=(',', ': '), default=lambda: "[nasty iterable]")
 		try:
 			with (open(output_json_file,'w') if output_json_file else sys.stdout) as output_handle:
 				output_handle.write(report)
@@ -880,7 +890,6 @@ class RCQCInterpreter(object):
 		# Retrieval of shortcut variable name .z when original name is x.y.z		
 		if myName[0] == '/':
 			if len(myName) == 1:
-				# Not a good path: '/'
 				raise ValueError ("Problem: given location is just an empty path '/'")
 		
 			if len(splitName)  == 2: 
@@ -888,31 +897,43 @@ class RCQCInterpreter(object):
 				if lastTerm in self.namespace['name_index']:
 					#print "Found (_, %s)" % lastTerm
 					return (self.namespace['name_index'][lastTerm], lastTerm)
+				else:
+					print ('ALERT: "%s" not found in namespace so it is now a string constant.  Perhaps it didn\'t get set?' % lastTerm)
 			return myName
 
 		for (ptr, part) in enumerate(splitName):
 			if ptr == len(splitName)-1:
 				if not isinstance(focus, dict):
 					raise TypeError('The namespace path "%s" isn\'t a dictionary but it needs to be.  Did a rule previously set it to a constant?' % '/'.join(splitName[0:ptr]) )
-					
+				
 				# Abbreviated name can't be numeric (an array index), and it can't be a string-replace % variable
 				if isinstance (part, basestring) and not part.isdigit() and not '%(' in part:
 					if DEBUG > 0: print ('Overwriting "/%s"' if part in self.namespace['name_index'] else 'Setting "/%s"') % part
 					self.namespace['name_index'][part] = focus
 
 				return (focus, part)
-			if part in focus: 	
+				
+			
+			if part in focus:
+				print "At: ", part 	
 				focus = focus[part] # Advance along path
-			else:
-				focus[part] = {}
+			else: # Just given a key to create as a new dictionary/
+				focus[part] = {} # ISSUE: do we create a dictionary, an ordered dictionary  or a list?
 				focus = focus[part]
 
 
 	def namespaceReadValue(self, myName):
 		"""
-		Attempts to find value in appropriate path, and return that object or value; 
-		But if not found, will return myName as a literal.
+		Attempts to find value in appropriate path, and return that object or value;
+		if part "b" in "a/b/c" is numeric, will check to see if "a" is an array. 
+		
+		If whole path is not found, will return myName as a literal.
+		
 		Assumes all a/b{name}/c substitutions have already been done.
+		
+		TESTING: NO LEADING SLASH FOR ABBREVIATION:
+		Means "report" can get confused with bottom level variable if someone set that.
+		Abbreviations are checked for top-level match before bottom-level match.
 		"""
 		if not isinstance(myName, basestring):
 			return myName
@@ -922,10 +943,6 @@ class RCQCInterpreter(object):
 			
 		focus = self.namespace		
 		
-		# TESTING: NO LEADING SLASH FOR ABBREVIATION:
-		# Means "report" can get confused with bottom level variable if someone set that.
-		# So global namespace context may be too much.
-		# Maybe search top-level first
 		if not '/' in myName:
 			if myName in focus: # Check for root variable reference first
 				return focus[myName]
@@ -939,24 +956,32 @@ class RCQCInterpreter(object):
 		splitName = myName.split('/')
 
 		# Determine if we are looking at an abbreviation "/[leaf variable name]"
-		# PHASE THIS OUT ???
+		# PHASE THIS OUT ??? Above catches abbreviations without leading slash.
 		if myName[0] == '/':
 			if len(splitName) == 2: 
 				(reference, returnable) = self.getNickname(splitName[1])
 				if returnable:
 					return reference
 			return myName # No nickname so returning literal "/whatever".
-			
-			
-		
+
+		#Here we have a path with slashes
 		for (ptr, part) in enumerate(splitName):
-			if not focus == None and part in focus: 
-				if not isinstance(focus, dict):
-					raise TypeError('The location namespace path "%s" isn\'t a dictionary but it needs to be.  Did a rule previously set it to a constant?' % '/'.join(splitName[0:ptr]) )
-							
-				focus = focus[part] # Advance along path
-			else:		
-				return myName # Retain basestring data type.  Term is a literal expression
+			if focus != None:
+				if isinstance(focus, dict):
+					if part in focus:
+						focus = focus[part] # Advance along path
+						continue
+						
+				if isinstance(focus, list):
+					if part.isnumeric():
+						partint = int(part)
+						if partint >= 0 and partint < len(focus):
+							focus = focus[partint]
+							continue
+
+					raise TypeError('The location namespace path "%s" is a list, but it doesn\'t have position "%s" !' % ('/'.join(splitName[0:ptr]), part) )
+
+			return myName # Term is a literal 
 
 		return focus # now a value / object
 	
@@ -983,7 +1008,7 @@ class RCQCInterpreter(object):
 		parser = MyParser(
 			description = 'Report Calc for Quality Control (RCQC) is an interpreter for the RCQC scripting language for text-mining log and data files to create reports and to control workflow within a workflow engine. It works as a python command line tool and also as a Galaxy bioinformatics platform tool.  See https://github.com/Public-Health-Bioinformatics/rcqc',
 			usage = 'rcqc.py [options]*',
-			epilog=""" """)
+			epilog="""  """)
 		
 		# Standard code version identifier.
 		parser.add_option('-v', '--version', dest='code_version', default=False,
