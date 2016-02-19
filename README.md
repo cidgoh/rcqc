@@ -1,7 +1,9 @@
 # rcqc
-Report Calc for Quality Control (RCQC) is an interpreter for the RCQC scripting language for text-mining log and data files to create reports and to control workflow within a workflow engine.  It works as a python command line tool and also as a Galaxy bioinformatics platform tool.
+Report Calc for Quality Control (RCQC) is an interpreter for the RCQC scripting language for text-mining log and data files to create reports and to control workflow within a workflow engine.  It works as a python command line tool and also as a Galaxy bioinformatics platform tool.  We're building a library of simple "recipe" scripts that extract quality control (QC) data from various reports like FastQC, QUAST, CheckM and SPAdes into a common JSON data format.  By placing the RCQC app in your workflow downstream from one of these apps, you can convert their textual or tabular data into a much more standardized and software-friendly format.
 
-See the [wiki](https://github.com/Public-Health-Bioinformatics/rcqc/wiki) for extensive documentation.  Here is the command line summary:
+A second objective is to enable selected QC terms (that have been text-mined) to be marked up with their globally accessable ontology identifiers.  Currently GenEpiO, our under-development ontology, hosts key genome assembly quality control terms like "genome size ratio", contig count and various QC threshold terms.  This should be a step towards enabling pipelines to generate QC measurements that are part of the software accreditation process for adoption in commercial and public health laboratories.
+
+See the [wiki](https://github.com/Public-Health-Bioinformatics/rcqc/wiki) for extensive documentation - especially the "Getting started" page.  Here is the command line summary:
 
 ```
 Usage: rcqc.py [ruleSet file] [input files] [options]*
@@ -38,3 +40,14 @@ Options:
                         Save modified ruleset to a file.
   -d, --debug           Provides more detail about rule execution on stdout.
   ```
+
+This tool does require a few python modules:
+
+pip install dateutils
+pip install pyparsing
+
+If you encounter ssl (encryption key) related problems in trying to use pip to install them, you might need to run:
+
+pip install requests —upgrade
+
+For the Galaxy tool these will be added as dependencies soon.
