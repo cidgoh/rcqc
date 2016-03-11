@@ -30,12 +30,14 @@ Options:
                         Output report to this file, or to stdout if none
                         given.
   -r RULES_FILE_PATH, --rules=RULES_FILE_PATH
-                        Read rules from this file.
+                        Read JSON format recipe rules from this file.
   -e EXECUTE, --execute=EXECUTE
                         Ruleset sections to execute.
   -c CUSTOM_RULES, --custom=CUSTOM_RULES
-                        Provide custom rules in addition to (or to override)
-                        rules from a file.  Helpful for testing variations.
+                        Read and incorporate custom rules from a file into a
+                        json recipe.  Helpful for testing variations.
+  -p PLAIN_RULES, --plain=PLAIN_RULES
+                        Read recipe rules in plain format from this file.
   -s SAVE_RULES_PATH, --save_rules=SAVE_RULES_PATH
                         Save modified ruleset to a file.
   -d, --debug           Provides more detail about rule execution on stdout.
