@@ -660,24 +660,32 @@ class RCQCInterpreter(object):
 			
 		self.namespace['rulesets'] = rulefileobj['rulesets']
 
-		if self.options.custom_rules:
+		if self.options.custom_rules or self.options.plain_rules:
 			# options.custom_rules is a short-lived file, existing only so long as tool is executing.
 			# The Galaxy tool <configfile> tag writes this content directly as json data.
-			#with open(self.options.custom_rules,'r') as rules_handle: print  rules_handle.read()
+
+			self.custom_rules = []			
+			if self.options.custom_rules:
+				with open(self.options.custom_rules,'r') as rules_handle:
+					lines = rules_handle.readlines()
 			
-			with open(self.options.custom_rules,'r') as rules_handle:
-				lines = rules_handle.readlines()
-			
-			self.custom_rules = []
-			for line in lines:
-				print line
-				linesplit = line.strip().split('\t',2) # remaining tabs are within rule content
-				if len(linesplit) == 3:
-					(row,drop,rules) = linesplit 
+				for line in lines:
+					print line
+					linesplit = line.strip().split('\t',2) # remaining tabs are within rule content
+					if len(linesplit) == 3:
+						(row,drop,rules) = linesplit 
+						self.custom_rules.append({
+							'row':row,
+							'drop': 0 if drop == 'False' else int(drop),
+							'rules': rules.decode('base64')
+						})
+			else:
+
+				with open(self.options.plain_rules,'r') as rules_handle:
 					self.custom_rules.append({
-						'row':row,
-						'drop': 0 if drop == 'False' else int(drop),
-						'rules': rules.decode('base64')
+						'row': 'Processing:0',
+						'drop': 0,
+						'rules': rules_handle.read()
 					})
 			
 			# Using this to convert "f1 (a f2 (c d))" into python nested array [f1 [a,  f2 [c, d]]]
@@ -1027,12 +1035,15 @@ class RCQCInterpreter(object):
 		help='Output report to this file, or to stdout if none given.')
 
 		parser.add_option('-r', '--rules', type='string', dest='rules_file_path',  
-		help='Read rules from this file.')
+		help='Read JSON format recipe rules from this file.')
 
 		parser.add_option('-e', '--execute', type='string', dest='execute',  default='',
 		help='Ruleset sections to execute.')  
 		
-		parser.add_option('-c', '--custom', type='string', dest='custom_rules', help='Provide custom rules in addition to (or to override) rules from a file.  Helpful for testing variations.')
+		parser.add_option('-c', '--custom', type='string', dest='custom_rules', help='Read and incorporate custom rules from a file into a json recipe.  Helpful for testing variations.')
+
+		parser.add_option('-p', '--plain', type='string', dest='plain_rules',  
+		help='Read recipe rules in plain format from this file.')
 
 		parser.add_option('-s', '--save_rules', type='string', dest='save_rules_path', help='Save modified ruleset to a file.')
 
