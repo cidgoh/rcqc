@@ -1,5 +1,5 @@
-<tool id="rcqc" name="Report Calc for Quality Control" version="0.1.0" refresh_on_change="True">
-	<description>This tool is an interpreter for RCQC scripting language rule files.  It can text-mine documents for field labels and values, and can execute rules that manipulate these values in its memory resident data store in order to control job execution flow within a workflow engine. It easily provides basic tab-delimited, JSON and HTML reporting of the text-mined data.</description>
+<tool id="rcqc" name="Report Calc for Quality Control" version="0.1.1" refresh_on_change="True">
+	<description>This is the power-user interpreter for the RCQC scripting language which can text-mine documents for field labels and values, and can execute rules in order to control job execution flow within a workflow engine.</description>
 	<requirements>
 		<requirement type="package" version="0.1.0">rcqc</requirement>
 	</requirements>
@@ -10,52 +10,83 @@
     </requirements>
     <command interpreter="python"><![CDATA[
         rcqc.py
-        -H "$html_file" 
-        -f "$html_file.files_path"
+        --HTML "$html_file" 
+        --folder "$html_file.files_path"
         #set $sep = ''
-        -i "
+        --input "
         #for $i, $f in enumerate($input_files)
         	$sep$f.file_name:$f.name:$f.ext
         	#set $sep = ','
         #end for
         "
-        -r "$rules_file"
-        
-        #if $output_json
-        -o "$output_json_file"
+
+		#if $daisychain
+		--daisychain $daisychain
+		#end if
+
+        #if $reference
+        ## --tables "${ str($__app__.config.tool_data_path) + '/' + str($__app__.tool_data_tables[ 'reference_genome'].get_filename_for_source(False).split('/')[1] ) }:$reference" 
+        ## Hassle: what were numbers in data table are now json strings:
+        #set $data = filter( lambda x: str( x['value'] ) == str( $reference ), $__app__.tool_data_tables[ 'rcqc_parameters' ].get_named_fields_list() )
+        #set $obj = []
+        #for $field in $data
+        	#set $obj[$data['type']] = $data['name']
+		#end for
+        --json "{\"report/parameters\": ${str( $obj ).replace("'",r'\"') } }" 
         #end if
         
-	   -e "$rule_sections"
+        --recipe "$recipe_file"
+        
+        #if $output_json
+        --output "$output_json_file"
+        #end if
+        
+	   --options "$optional_section"
 	   
         #if len($custom)
-        -c "$custom_rules"
+        --custom "$custom_rules"
         #end if
 
         #if $save_rules
-        -s "$save_rule_file"
+        --save_rules "$save_rule_file"
         #end if
         
         #if $debug
-        -d
+        --debug
         #end if
     ]]></command>
     
     <inputs>
 		<param name="input_files" type="data" format="tabular,txt,json" multiple="true" label="Log or report file(s) to analyze"/> 
-		<param name="rules_file" type="data" format="json" label="Rule file" optional="True" refresh_on_change="True" /> 
+ 
+		<param name="daisychain" type="data" format="json" optional="True" label="Previous RCQC report to add on too"/> 
 
-		<param name="rule_sections" type="select" label="Rule section execution" dynamic_options="get_rule_section(rules_file)" multiple="true" help="Select which sections of the rule file should be executed." />
+		<param name="reference" type="select" label="Reference Genome" optional="True" help="Select a reference genome to have related settings (e.g. good reference genome size ratio) inserted into the recipe job.">
+    			<options from_data_table="rcqc_parameters">
+                    <filter type="sort_by" column="name"/>
+                   <filter type="static_value" name="type" value="label" column="1" />
+              </options>
+  		</param>
+
+		<param name="recipe_file" type="select" display="radio" label="Recipe script" optional="True">
+			<options from_data_table="rcqc_recipes"/>
+		</param>
+		<!-- param name="recipe_file" type="select" display="radio" label="Recipe script" dynamic_options="get_recipe_list()" optional="True" / -->
+		<param name="recipe_file2" type="data" format="json" label="OR recipe script (from history)" optional="True" refresh_on_change="True" />
+
+		<param name="optional_section" type="select" display="radio" label="Recipe script option" dynamic_options="get_rule_section(recipe_file, False)"  help="Select which sections of the rule file should be executed." optional="True" />
 		
 		<repeat name="custom" title="Modify rule section" >
 			
 			<param name="rule_position" type="select" label="At rule" dynamic_options="get_rule_list()" multiple="false" optional="True"  />
-
 			<param name="drop_rule" type="boolean" label="Drop this rule" truevalue="1" falsevalue="0"/>
 			<param name="rules" type="text" area="True" size="5x50" label="Add rule(s) in format: function (parameter1 parameter2 ...) ..." />
-			<param name="function_list" type="select" label="Function reference"  dynamic_options="get_function_list()" help="Look up function definitions here for functions used in you rules." />
+
 		</repeat>	
-		
-		<param name="save_rules" type="boolean" label="Save new rule set" help="If you customize your rule set you can save it to a new rule file" default="False" />	
+
+		<param name="function_list" type="select" label="Function reference"  dynamic_options="get_function_list()" help="Look up function definitions here for functions used in you rules.  This is not an input." />
+			
+		<param name="save_rules" type="boolean" label="Save new rule set" help="If you customize your rule set you can save it to a new rule file" default="False" />
 
 		<param name="output_json" type="boolean" label="Output 'report/' namespace as json dataset" help="This can be input to a subsequent report engine" default="False" />	
 
@@ -88,11 +119,11 @@ $rule_choice.rule_position	$rule_choice.drop_rule	$rule_choice.rules.encode('bas
 ===============================
 Report Calc for Quality Control
 ===============================
-Report Calc for Quality Control (RCQC) is basically a scripting language interpreter that can text-mine documents for field labels and values, and can execute rules that manipulate these values in its memory resident data store in order to create reports and to control job execution flow within a workflow engine. It provides basic tab-delimited, JSON and HTML reporting of any portion of its data store.  RCQC liaises with the overarching workflow engine via its own exit codes. The design goal is to allow easy adjustment of rules and parameters that affect workflow processing.
+Report Calc for Quality Control (RCQC) is a simple scripting language interpreter that can text-mine documents for field labels and values, and can execute rules that manipulate these values in its memory resident data store - or "namespace" - in order to create reports and to control job execution flow within a workflow engine. It provides basic tab-delimited, JSON and HTML reporting of any portion of its data store.  RCQC liaises with the overarching workflow engine via its own exit codes. The design goal is to allow easy adjustment of rules and parameters that affect workflow processing.
 
-RCQC Rules can locate and parse numeric, boolean and other data from the input files which can be in text, tabular and JSON format.  Each rule is expressed as a function followed by parameters, where each parameter can also be a function with parameters, e.g. "functionA(parameter1 parameter2 functionB(parameter3 ...) )". Rules are executed from top to bottom. Behind the scenes rules are actually translated into JSON format. 
+RCQC runs "recipe files" of rules that can locate and parse numeric, boolean and other data from the input files which can be in text, tabular and JSON format.  Each rule is expressed as a function followed by parameters, where each parameter can also be a function with parameters, e.g. "functionA(parameter1 parameter2 functionB(parameter3 ...) )". Rules are executed from top to bottom. Behind the scenes rules are actually translated into JSON format. 
 
-If after all the rules have processed, a namespace variable called **"report/job/status"** has been set to **"fail"**, that will cause an exit code of 1 to be returned to Galaxy after the report is written.  This enables a job to be marked in an error state as a result of quality control reporting. (Currently however one cannot make other workflow apps conditional on earlier Report Calc success, so one cannot stop other parts of a workflow early.)
+Note that there are two levels of failure this tool can report.  A QC failure (shown as function "**fail(qc [message])**" ) is a message inserted into the report, but no change in workflow behaviour occurs.  A JOB failure (shown as "**fail(job [message])**" ) provides the report with a job error message but also fails the RCQC job task (and potentially the workflow as a whole).  Currently however only more recent Galaxy versions can trigger a halt to a workflow.
 
 More details on the RCQC language and interpreter are available at https://github.com/public-health-bioinformatics/rcqc/wiki
 

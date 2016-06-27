@@ -1,0 +1,303 @@
+{  "title": "IRIDA generic assembly quality control v1.0 (Spades)",
+    "sections": [
+        {
+            "name": "Ontology",
+            "@context": {
+                "assembly_genome_size": "http://purl.obolibrary.org/obo/GenEpiO_0001561",
+                "contig_N50": "http://purl.obolibrary.org/obo/OBI_0001941",
+                "contig_N50_QC_threshold": "http://purl.obolibrary.org/obo/GenEpiO_0001565",
+                "contig_N99": "http://purl.obolibrary.org/obo/GenEpiO_0001570",
+                "contig_N99_QC_threshold": "http://purl.obolibrary.org/obo/GenEpiO_0001566",
+                "contig_count": "http://purl.obolibrary.org/obo/GenEpiO_0000093",
+                "contig_count_QC_threshold": "http://purl.obolibrary.org/obo/GenEpiO_0001571",
+                "contigs": "http://purl.obolibrary.org/obo/SO_0001462",
+                "date": "http://purl.obolibrary.org/obo/IAO_0000416",
+                "genome_size_ratio": "http://purl.obolibrary.org/obo/GenEpiO_0001563",
+                "genome_size_ratio_QC_threshold": "http://purl.obolibrary.org/obo/GenEpiO_0001564",
+                "reference_genome_identifier": "http://purl.obolibrary.org/obo/GenEpiO_0001562",
+                "reference_genome_size": "http://purl.obolibrary.org/obo/GenEpiO_0001560"
+            }
+        },
+        {
+            "name": "Settings-salmonella",
+			"type":"optional",
+            "rules": [
+                [
+                    "store",
+                    4857000,
+                    "report/contigs/reference_genome_size"
+                ],
+                [
+                    "store",
+                    "serovar Typhimurium LT2",
+                    "report/contigs/reference_genome_identifier"
+                ],
+                [
+                    "store",
+                    0.10000000000000001,
+                    "report/contigs/genome_size_ratio_QC_threshold"
+                ]
+            ]
+        },
+        {
+            "name": "Settings-ecoli",
+			"type":"optional",
+            "rules": [
+                [
+                    "store",
+                    5324560,
+                    "report/contigs/reference_genome_size"
+                ],
+                [
+                    "store",
+                    "E. coli ATCC 35150 NalR",
+                    "report/contigs/reference_genome_subspecies"
+                ],
+                [
+                    "store",
+                    "ASM93507v1",
+                    "report/contigs/reference_genome_identifier"
+                ],
+                [
+                    "store",
+                    0.29999999999999999,
+                    "report/contigs/genome_size_ratio_QC_threshold"
+                ]
+            ]
+        },
+        {
+            "name": "Processing",
+            "rules": [
+                [
+                    "store",
+                    "\\[FLASH]\\s*(?P<name>\\w+[\\s\\w]*):\\s*(?P<value>[^\\n]*)",
+                    "regexpressions/name_value_dict"
+                ],
+                [
+                    "store",
+                    [
+                        "loadFileByName",
+                        "flash.log"
+                    ],
+                    "file/flash/flash_text"
+                ],
+                [
+                    "store",
+                    [
+                        "regexp",
+                        [
+                            "section",
+                            "flash_text",
+                            "Read combination statistics:",
+                            "Writing histogram files."
+                        ],
+                        "name_value_dict",
+                        "nameUnderScore"
+                    ],
+                    "report/flash/parameters/{name}"
+                ],
+                [
+                    "iterate",
+                    [
+                        "readFileByName",
+                        "contigs-all.fasta"
+                    ],
+                    "myDict",
+                    [
+                        "if",
+                        [
+                            [
+                                "getitem",
+                                "myDict/value",
+                                0
+                            ],
+                            "==",
+                            ">"
+                        ],
+                        [
+                            "append",
+                            [
+                                "regexp",
+                                "myDict/value",
+                                "length_(?P<value>\\d+)_"
+                            ],
+                            "report/contigs/contig_lengths"
+                        ]
+                    ]
+                ],
+                [
+                    "store",
+                    [
+                        "sorted",
+                        "contig_lengths"
+                    ],
+                    "contig_lengths"
+                ],
+                [
+                    "store",
+                    [
+                        "parseInt",
+                        [
+                            "fsum",
+                            "contig_lengths"
+                        ]
+                    ],
+                    "report/contigs/assembly_genome_size"
+                ],
+                [
+                    "store",
+                    [
+                        "length",
+                        "contig_lengths"
+                    ],
+                    "report/contigs/contig_count"
+                ]
+            ]
+        },
+        {
+            "name": "Quality control",
+            "rules": [
+                [
+                    "store",
+                    200,
+                    "report/contigs/contig_count_QC_threshold"
+                ],
+                [
+                    "store",
+                    200000,
+                    "report/contigs/contig_N50_QC_threshold"
+                ],
+                [
+                    "store",
+                    2000,
+                    "report/contigs/contig_N99_QC_threshold"
+                ],
+                [
+                    "store",
+                    [
+                        [
+                            "abs",
+                            [
+                                "assembly_genome_size",
+                                "-",
+                                "reference_genome_size"
+                            ]
+                        ],
+                        "/",
+                        "reference_genome_size"
+                    ],
+                    "report/contigs/genome_size_ratio"
+                ],
+                [
+                    "if",
+                    [
+                        "genome_size_ratio",
+                        ">",
+                        "genome_size_ratio_QC_threshold"
+                    ],
+                    [
+                        "fail",
+                        "qc",
+                        "Failed genome size ratio threshold"
+                    ]
+                ],
+                [
+                    "store",
+                    [
+                        "statisticN",
+                        "contig_lengths",
+                        50
+                    ],
+                    "report/contigs/contig_N50"
+                ],
+                [
+                    "store",
+                    [
+                        "statisticN",
+                        "contig_lengths",
+                        99
+                    ],
+                    "report/contigs/contig_N99"
+                ],
+                [
+                    "if",
+                    [
+                        "contig_N50",
+                        "<",
+                        "contig_N50_QC_threshold"
+                    ],
+                    [
+                        "fail",
+                        "qc",
+                        "Failed minimum N50 contig length threshold"
+                    ]
+                ],
+                [
+                    "if",
+                    [
+                        "contig_N99",
+                        "<",
+                        "contig_N99_QC_threshold"
+                    ],
+                    [
+                        "fail",
+                        "qc",
+                        "Failed minimum N99 contig length threshold"
+                    ]
+                ],
+                [
+                    "if",
+                    [
+                        "contig_count",
+                        ">",
+                        "contig_count_QC_threshold"
+                    ],
+                    [
+                        "fail",
+                        "job",
+                        "Failed minimum contig count threshold"
+                    ]
+                ]
+            ]
+        },
+        {
+            "name": "Reporting",
+            "rules": [
+                [
+                    "store",
+                    "rulesets/0/@context",
+                    "report/@context"
+                ],
+                [
+                    "writeFile",
+                    [
+                        "pageHtml",
+                        [
+                            "getHtml",
+                            "report",
+                            "My Report Widget"
+                        ]
+                    ],
+                    "report.html"
+                ],
+                [
+                    "writeFile",
+                    [
+                        "getTabular",
+                        "report/flash/parameters"
+                    ],
+                    "tabular_report.tab"
+                ],
+                [
+                    "iconcat",
+                    "report_html",
+                    [
+                        "getHtml",
+                        "report",
+                        "My Tool Report"
+                    ]
+                ]
+            ]
+        }
+    ]
+}

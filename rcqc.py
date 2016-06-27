@@ -3,7 +3,6 @@
 
 import datetime
 import glob
-import json
 import operator
 import optparse
 import math
@@ -11,41 +10,45 @@ import os
 import pyparsing
 import re
 import sys
+import numbers
 
-try:
-    from collections import OrderedDict
-except ImportError:
-    from ordereddict import OrderedDict
-    
+try: #Python 2.7
+	from collections import OrderedDict
+except ImportError: # Python 2.6
+	from ordereddict import OrderedDict
+	
+try:	
+	import simplejson as json
+except ImportError: # Python 2.6
+    	import json
+
 # These three classes, plus self.functions below, provide all of the functions available in rules to massage report data
 from rcqc_functions.rcqc_functions import RCQCClassFnExtension
 from rcqc_functions.rcqc_functions import RCQCStaticFnExtension
 
-CODE_VERSION = '0.0.7'
+CODE_VERSION = '0.1.1'
 DEBUG = 0
-# 3 place infix operators e.g. "a < b" conversion to equivalent "lt(a b)" phrase.  Allowing all items with < and > in them to be referenced as gt lt etc. because otherwise Galaxy currently convers "<" to &gt; entity.
+# 3 place infix operators e.g. "a < b" conversion to equivalent "lt(a b)" phrase.  
+# Allowing all items with < and > in them to be referenced as gt lt etc.
+RCQC_OPERATOR_2 = { '-':'neg', 'not':'not_' }
 RCQC_OPERATOR_3 = {
-	'<': 'lt',
-	'lt': 'lt',
-	'>':'gt',
-	'gt':'gt',
-	'>=':'ge',
-	'ge':'ge',
+	'=': '=',
+	'<': 'lt', 'lt': 'lt',
+	'>':'gt', 'gt':'gt',
+	'>=':'ge',	'ge':'ge', 'gte':'ge',
 	'==':'eq',
-	'<=':'le',
-	'le':'le',
-	'!=':'ne',
-	'<>':'ne',
-	'ne':'ne',
+	'<=':'le', 'le':'le', 'lte': 'le',
+	'!=':'ne', '<>':'ne', 'ne':'ne',
 	'*':'mul',
 	'**':'pow',
-	'/':'truediv',
-	'//':'truediv',
+	'/':'truediv', '//':'truediv',
 	'-':'sub',
 	'+':'add',
+	'+=':'iadd',
 	'%':'mod'
 } 
-		
+
+
 class MyParser(optparse.OptionParser):
 	"""
 	Allows formatted help info.  From http://stackoverflow.com/questions/1857346/python-optparse-how-to-include-additional-info-in-usage-output.
@@ -78,14 +81,14 @@ class RCQCInterpreter(object):
 		self.namespace['report']['job'] = {'status': 'ok'}
 		self.namespace['report']['quality_control'] =  {'status': 'ok'}
 
-		self.namespace['rulesets'] = []
+		self.namespace['sections'] = []
 		self.namespace['rule_index'] = {} # rule index based on location of store(_, location) field. 1 per.
 		self.namespace['name_index'] = {} # index based on last (z) key of x.y.z namespace reference.
 		self.namespace['files'] = [] 
 		self.namespace['file_names'] = {} 
-		self.namespace['iterator'] = {} # Provides the dictionary for each current function evaluation (at call depth). 
+		self.namespace['iterator'] = {} # Provides the dictionary for each current iterator function evaluation (at call depth). 
 		self.namespace['report_html'] = ''	
-				
+
 		self.input_file_paths = None	
 		self.ruleset_file_path = None	
 		self.output_json_file = None	
@@ -93,13 +96,16 @@ class RCQCInterpreter(object):
 		# Really core functions below require access to RCQC class variables.  
 		# Other functions can be added in rcqc_functions RCQCClassFnExtension and RCQCStaticFnExtension classes.
 		self.functions = {
+			'=': lambda location, value: self.storeNamespaceValue(value, location),
 			'store': self.storeNamespaceValue, 
 			'store_array': self.storeNamespaceValueAsArray,
 			'if': self.fnIf,
 			'fail': self.fail,
 			'exit': self.exit,
-			'-': lambda x: operator.neg(x), # One of the few unary operators.
-			'not': lambda x: operator.not_(x) 
+			'exists': lambda location: self.namespaceReadValue(location, True),
+			'-': lambda x: operator.neg(x),
+			'not': lambda x: operator.not_(x),
+			'function': lambda x: self.applyRules(x)
 		}
 		
 	
@@ -129,6 +135,24 @@ class RCQCInterpreter(object):
 		if options.code_version:
 			print CODE_VERSION
 			return CODE_VERSION
+			
+		if options.daisychain_file_path:
+			with open(options.daisychain_file_path, 'r') as daisychain_handle:
+				self.namespace['report'] = json.load(daisychain_handle, object_pairs_hook=OrderedDict)
+				# Nicknames need to be established! # I.e. every dictionary key in report namespace
+				# An existing report may have several sequence sections; this nickname system will only point to last in (ordered!? list).
+				for item in self.namespace['report']:
+					self.setNicknames(item, self.namespace['report'])
+				 
+		#NOTE: This flat list of settings are overwritten by any such settings the recipe script establishes.
+		if options.json_object:
+			json_data =  json.loads(options.json_object, object_pairs_hook=OrderedDict ) #OrderedDict preserves order.
+			for item in json_data:
+				# Issue: subsequent programming can rely on nicknames, so each variable read in needs 
+				# to be entered with store().
+				self.namespace[item] = {}
+				for item2 in json_data[item]:
+					self.storeNamespaceValue(self.getAtomicType(json_data[item][item2]) , item + '/' + item2)
 
 		if options.output_html_file: 
 			self.output_html_file = options.output_html_file 	#-H [file]
@@ -136,16 +160,19 @@ class RCQCInterpreter(object):
 		if options.input_file_paths: 
 			self.input_file_paths = options.input_file_paths.strip()	#-i [string]
 
-		self.execute = map(str.strip, options.execute.strip().strip(",").split(",") ) #cleanup list of execute sections
+		self.optional_sections = map(str.strip, options.optional_sections.strip().strip(",").split(",") ) #cleanup list of execute section(s)
 
 		# ************ MAIN CONTROL ***************
 		self.getRules()
-
-		print "Executing: " , self.execute, " from " , [str(item['name']) for item in self.namespace['rulesets'] ]
-
+		
 		if self.input_file_paths:
 			self.getInputFiles()
-		self.applyRules(self.execute)
+			
+		execute_sections = []		
+		for item in self.namespace['sections']:
+			if not 'type' in item or (item['type'] == 'optional' and item['name'] in self.optional_sections):
+				print "Executing: " , item['name'] 
+				self.applyRules(item['name'])
 
 		mytimedelta = datetime.datetime.utcnow() -_nowabout
 		print "Completed in %d.%d seconds." % (mytimedelta.seconds, mytimedelta.microseconds)
@@ -170,8 +197,6 @@ class RCQCInterpreter(object):
 			self.storeNamespaceValue("RETRY",  'report/job/status')
 		
 		# Failure trigger if report/job/status == "FAIL"
-		#if not  'job' in self.namespace['report']: self.namespace['report']['job']={'status':'ok'}
-		#if not 'status' in self.namespace['report']['job']: self.namespace['report']['job']['status']='ok'
 		status = self.namespace['report']['job']['status'].lower()
 		if status == 'fail':
 			exit_code = 1
@@ -194,6 +219,7 @@ class RCQCInterpreter(object):
 		self.storeNamespaceValue("FAIL",'report/%s/status' % location)
 		self.messageAppend(message, location)
 			
+			
 	def messageAppend(self, message=None, location='job'):
 		"""
 		given message is appended to list of exit/fail messages.  By default in report/job/message, but could be quality_control/ too.
@@ -201,23 +227,23 @@ class RCQCInterpreter(object):
 		if message:	
 			if not 'message' in self.namespace['report'][location]:	
 				self.namespace['report'][location]['message'] = []
-			self.namespace['report'][location]['message'].append(message)
 
+			message = self.namespaceSearchReplace(message)  # could even be a variable?	
+			self.namespace['report'][location]['message'].append(message)
 			
-	def applyRules(self, execute_sections):
+			
+	def applyRules(self, section_name):
 		"""
 		Now apply each rule.  A rule consists of one or more functions followed by parameters.
-		NOTE: Ordering of execute_sections doesn't matter.  Execution order depends on rulesets order.
+		NOTE: Ordering of execute_sections doesn't matter.  Execution order depends on sections order.
 		"""
-		if DEBUG > 0: print self.namespace['rulesets']
-		
-		for section in self.namespace['rulesets']:
-			if section['name'] in execute_sections:
-				if 'rules' in section:
-					for (row, myRule) in enumerate(section['rules']):
-						self.rule_row = row
-						self.function_stack = []
-						self.evaluateFn(list(myRule)) # Whatever rules might return isn't used.
+		section = next((x for x in self.namespace['sections'] if x['name'] == section_name), None)
+		if DEBUG > 0: print self.section
+				
+		if 'rules' in section:
+			for (row, myRule) in enumerate(section['rules']):
+				self.rule_row = row
+				self.evaluateFn(list(myRule)) # Whatever rules might return isn't used.
 
 
 	def evaluateFn(self, myList):
@@ -232,46 +258,45 @@ class RCQCInterpreter(object):
 		
 		if DEBUG > 0: print "EVALUATING: " , myList
 		
-		termStr = myList[0] 
-		if not termStr:
+		term = myList[0] 
+		if not term:
 			print 'A funtion expression is empty in rule #' + str(self.rule_row)			
 			return
 		
-		term = termStr	
-		#term = None			
-		#try: # Might be an indirect reference to a function.  Skip this?
-		#	term = self.namespaceReadValue(termStr)
-		#except TypeError as e: 
-		#	self.ruleError(e)
-		#	return None
-		
-		if isinstance(term, basestring): # Possibly this is a function
-			childFn = self.matchFunction(term)
-			if childFn:
-				return self.executeFunction(childFn, myList)
+		if isinstance(term, basestring):
+			aFunction = self.matchFunction(term)
+			if aFunction:
+				return self.executeFunction(aFunction, myList)
+
+		elif isinstance(term, list): #This may be a list of functions
+			return self.executeFunction(self.matchFunction("all"), ["all"] + myList) #so myList 1st param run too.
 		
 		# Nothing to evaluate, so just return this verbatim.
 		print "RETURNING (no function): ", myList
 		return myList
-
+		
 
 	def executeFunction(self, childFn, myList):
 	
 		result = None
 		self.function_stack.append(childFn) #Save so subordinate functions have access to their caller
 		# Parameter is a function so evaluate it.  Could get a constant , dict or iterable back.
+		#if True:
 		try:
-			#if True:
+
 			fnObj = self.evaluateParams( childFn, myList[1:])
 
 			# Finally execute function on arguments.	
 			if DEBUG > 0: print 'Executing function:', fnObj['name'], fnObj['args']			
 			if childFn['static'] == True: 
 				result = fnObj['fn'](*fnObj['args'])
-				
+					
 				if childFn['inplace'] == True:
-					# If this is an in-place function, it means we need to swap out a temp variable for 1st arg and then set it via namespace.  
-					# result = fnObj['fn'](inplace, fnObj['args'][1])
+					# If this is an in-place function, it means we need to take function's returned value and place it in 1st parameter's textual value namespace.  
+					# arg[0] may be set to namespace value, for function to process.
+					# fnObj['argText'][0] is textual name of first variable that was recognized already, where inplace results are tob e stored.
+					# Mainly, 1st variable needs to remain a textual location. All inplace functions should RETURN their value for substitution this way.		
+					# result = fnObj['fn'](inplace, fnObj['args'][1]) #doesn't work
 					self.storeNamespaceValue(result, fnObj['argText'][0], False)
 				
 			else: # These functions need access to Report Calc instance's namespace or functions:
@@ -300,8 +325,7 @@ class RCQCInterpreter(object):
 			stop_err( 'Halting program' )
 		
 		finally: 
-			#"""
-			#if True:					
+			#"""					
 			self.function_stack.pop()
 			return result
 
@@ -317,7 +341,7 @@ class RCQCInterpreter(object):
 		else:
 			args = ''
 			fn_name = ''
-	 	print 'Rule #%s: %s(%s) problem %s :\n %s ' % ( self.rule_row, fn_name, args, type(e), str(e))
+	 	print 'Rule #%s: %s(%s) \nproblem %s : %s ' % ( self.rule_row, fn_name, args, type(e), str(e))
 	 	return None
 
 
@@ -338,11 +362,7 @@ class RCQCInterpreter(object):
 		"""
 		Evaluate each argument/parameter of function, subject to any meta rules about term evaluation.
 		"""
-
-		# TESTING: If INFIX (a < b) operators exist in parameter list, rewrite as prefix lt(a b) .
 		# Should move this to rule parser 2nd pass. (After rules are saved to file option)
-		# NOTE: ORDER OR PRECIDENCE IS SIMPLY LEFT TO RIGHT
-		#parameterList = self.infixToPrefix(parameterList)		
 		skipEval = False
 		parameterCount = 0
 			
@@ -367,20 +387,20 @@ class RCQCInterpreter(object):
 					if not isinstance (param1, bool):
 						stop_err('Error: the %s() command conditional in rule #%s was not a boolean: %s %s' % (functionName, self.rule_row, param1, type(param1) ) )
 						
-					# If the result of evaluating the first argument = False	
-					if param1 == False:
-				
-						# The "if" and "iif" functions don't have subsequent arguments evaluated
-						if argCt == 1:
-							skipEval = True # Appends further parameters to fn args but does not evaluate them.
+					# The  true expression is evaluated if conditional was true.
+					if argCt == 1:
+						skipEval = not param1
 
-						# "iif" also has 3rd argument which IS evaluated if first one is false. (Later args are also evaluated).
-						elif argCt == 2  and ruleObj['name'] == 'iif':
-						 	skipEval = False # Proceed to evaluate 3rd etc argument.
+					# "iif" also has 3rd etc. arguments which are evaluated if conditional was false.
+					elif argCt == 2  and functionName == 'iif':
+						skipEval = param1 # Proceed to evaluate 3rd etc argument.
 
 				elif functionName in ['getitem', 'iterate']: 
 					skipEval = True
-					
+			
+			elif functionName in [ 'note', 'function']: 
+				skipEval = True
+				
 			# Process another parameter if any			
 			if len(parameterList):
 				
@@ -397,20 +417,25 @@ class RCQCInterpreter(object):
 						filling =  '...' if len(ruleObj['argText']) == 0 else ', '.join( ruleObj['argText'] )
 						termStr = str(termStr[0]) + '( ' + filling + ' )'  # For debuging
 						
-					else:
+					elif isinstance(termStr, basestring): #might be a number or boolean.
 	  					
-	  					# If parameter is quoted, pass it as is. In this way we pass 
-	  					# string value which is never looked up against namespace.
-	  					if isinstance(termStr, basestring) and termStr[0] == termStr[-1] == '"':
+	  					# If parameter is quoted, pass it back as is. It is never looked up against namespace.
+	  					if len(termStr) and termStr[0] == termStr[-1] == '"':
 		  					result = termStr[1:-1]
-	  						
-	  					# Exception: when store(value location ...) called, must evaluate
-	  					# value but not location (location evaluated by store function dynamically).
-	  					elif not (functionName == 'store' and parameterCount==2) :
-							# Try parameter match to a namespace variable's value
+
+	  					# When store(value location ...) called, location gets s&r with possible %(...) pattern.
+	  					elif (functionName in ['store'] and parameterCount==2) \
+  							or ( (functionName in ['=','exists']) and parameterCount==1): # ruleObj['inplace'] == True or 
+  							#For a 'store' operation we never want the value of the target variable. 
+  							termStr = self.namespaceSearchReplace(termStr, True)
+  							result = termStr
+  						else:
+  							# Try parameter match to a namespace variable's value
+							# If no match found, it just returns given string.
+							termStr = self.namespaceSearchReplace(termStr) # CRITICAL for 
 							result = self.namespaceReadValue(termStr)
 	
-	  					# Could we use a de() delayed execution function 
+	  					# Do we need a de() delayed execution function 
 	  					# to preserve quotes for some functions to process?
 
 				# After adding new argument to current rule, re-evaluate it with respect to queue ...	
@@ -421,20 +446,6 @@ class RCQCInterpreter(object):
 			if len(parameterList) == 0:
 				return ruleObj
 		
-	"""	
-	def infixToPrefix(self, parameterList):
-		while len(parameterList) > 2:
-			testOperator = parameterList[1]
-			if isinstance(testOperator, basestring ) and testOperator in RCQC_OPERATOR_3:
-				# Revises function call so it is in prefix notation
-				prefixFn = RCQC_OPERATOR_3[ testOperator ]
-				parameterList = [ [ prefixFn , parameterList[0], parameterList[2] ] ] + parameterList[3:]
-
-			else:
-				break
-				
-		return parameterList
-	"""	
 		
 	def matchFunction(self, termStr):
 		"""
@@ -465,6 +476,8 @@ class RCQCInterpreter(object):
 			ruleFn = getattr(RCQCClassFnExtension, termStr)
 			argcount = ruleFn.func_code.co_argcount
 			static = False
+			if termStr in ['clear','iStatBP']:
+				inplace = True
 
 		elif hasattr(RCQCStaticFnExtension, termStr): 		
 			ruleFn = getattr(RCQCStaticFnExtension, termStr)
@@ -529,23 +542,16 @@ class RCQCInterpreter(object):
 		ISSUE: A list of items that are not dictionaries can be presented.  Should be a different case from iterable?
 				
 		"""
-		if not isinstance(location, basestring):
-			raise TypeError ("Location needs to be a namespace path string of form x/y/z.  It may include x/y{namespace_reference}/z substitutions.")
-	
+
 		fnDepth = str(len(self.function_stack)-1)
 		self.namespace['iterator'][fnDepth] = None
-
-		valueObj = self.namespaceSearchReplace(valueObj)
-		location = self.namespaceSearchReplace(location, True)
-						
+					
 		#Note: for "a/b/c", this creates a dictionary obj called "b" at "a/b" if it doesn't exist already.
-		print location
-		
 		(obj, key) = self.getNamespace(location) 
 
 		# This catches case where valueObj is not an iterable.  It is a simple string, number, or boolean.
 		if not (hasattr(valueObj, '__iter__')): #  or isinstance( valueObj, (dict, list) ) 
-			if DEBUG > 0: print "store(..., %s) = %s" % (location, valueObj)		
+			if DEBUG > 0: "store(%s, %s)" % (valueObj, location)		
 			obj[key] = valueObj
 			self.evaluateAuxFunctions(auxFunctions)
 			return True
@@ -593,8 +599,7 @@ class RCQCInterpreter(object):
 				obj[key] = myResultArray
 			elif len(myResultArray) == 1: 
 				obj[key] = myResultArray[0]
-				
-		
+
 			#if DEBUG > 0: print "Set single entry (%s) /%s" % (location, key)
 
 
@@ -610,83 +615,90 @@ class RCQCInterpreter(object):
 	def namespaceSearchReplace(self, location, convert=False):
 		"""
 		convert=True: causes {name} expression to be converted to python %(name)s expression if {name} not found in namespace.  Means it was meant for narrower iterator dictionary search and replace scope.
-		"""
+		Check case where string substitutions "a/b{name}/c" point to namespace locations.
+		Note: this might conflict with dictionary terms.  It is up to programmer to avoid namespace vs dictionary term confusion (e.g. "value" or "name" used as variables and dictionary keys).  Or we add distinguishing mark for dictionary lookup.
+
+		INPUT
+		location: string
 		
-		if not isinstance(location, basestring) or not '{' in location:
+		RETURNS
+			string
+		"""
+
+		if not isinstance(location, basestring):
 			return location
 
-		# Check case where string substitutions "a/b{name}/c" point to namespace locations:
-		# Note: this might conflict with dictionary terms.  It is up to programmer to avoid namespace vs dictionary term confusion (e.g. "value" or "name" used as variables and dictionary keys).  Or we add distinguishing mark for dictionary lookup.
-
-		locationPath = re.split('({[^{}]+})', location)
-		if DEBUG > 0: print "S&R:" , locationPath
-		for ptr, phrase in enumerate(locationPath):
-			if len(phrase) > 0 and phrase[0] == '{' and phrase[-1] == '}':
-				reference = phrase[1:-1]
-				newReference = self.namespaceReadValue(reference)
-				if isinstance(newReference, basestring):
-					if reference != newReference:	
-						locationPath[ptr] = newReference 
-
-					elif convert == True: 
-						# If no change in value then it wasn't recognized in namespace.
-						# So convert it to dictionary lookup %([phrase])s instead.
-						locationPath[ptr] = '%(' + reference + ')s'
+		ptr = 0
+		while True:
+			startPtr = location.find('{', ptr)
+			if startPtr == -1: break;
+			endPtr = location.find('}', startPtr+1)
+			if endPtr == -1: break;
+		
+			reference = location[startPtr+1 : endPtr]
+			newReference = self.namespaceReadValue(reference)
+			#Allow strings and numbers to be substituted in
+			if isinstance(newReference, numbers.Number):
+				newReference = str(newReference) 
 				
-				#else: #Lookup should have matched a namespace string value.
-		locationPath = ''.join(locationPath)
-		print "S&R:" , locationPath
-		return ''.join(locationPath)
+			if isinstance(newReference, basestring):
+				if reference == newReference and convert == True:
+					# If no change in value then it wasn't recognized in namespace.
+					# So convert it to dictionary lookup %([phrase])s instead.
+					newReference = '%(' + reference + ')s'
+				
+				location = location[:startPtr] + newReference + location[endPtr +1:]
+
+				ptr = startPtr+len(newReference)
+			else:
+				ptr = endPtr 
+	
+		return location
 
 
 	def getRules(self):
+		
+		if self.options.recipe_file_path and self.options.recipe_file_path != 'None':
+			self.recipe_file_path = self.options.recipe_file_path
+			if self.recipe_file_path[0] != '/': # Get absolute path if relative path provided.  Expecting 'recipes/[recipe_name]'
+				self.recipe_file_path = self.getSelfDir() + '/' + self.recipe_file_path
 				
-		if self.options.rules_file_path and self.options.rules_file_path != 'None':
-			self.rules_file_path = self.options.rules_file_path
-			if not os.path.exists(self.rules_file_path):
-			 	stop_err('Unable to locate the rule file!\nWorking folder: %s \nRules file: %s' %(os.getcwd(), self.rules_file_path) )
+			if not os.path.exists(self.recipe_file_path):
+			 	stop_err('Unable to locate the recipe file! \nRecipe file: %s' % self.recipe_file_path )
 			 	
-			with open(self.rules_file_path,'r') as rules_handle:
-				rulefileobj =  json.load(rules_handle)
+			with open(self.recipe_file_path,'r') as rules_handle:
+				rulefileobj =  json.load(rules_handle, object_pairs_hook=OrderedDict)
 		else:
 			# Provides a default empty ruleset to add customized rules to.
 			rulefileobj = {
-				'rulesets':[{
+				'sections':[{
 					'name': 'Processing',
 					'rules': []
 				}]
 			}
-			self.execute = ['Processing']
+			self.optional_sections = ['Processing']
 			
-		self.namespace['rulesets'] = rulefileobj['rulesets']
+		self.namespace['sections'] = rulefileobj['sections']
 
-		if self.options.custom_rules or self.options.plain_rules:
+		if self.options.custom_rules:
 			# options.custom_rules is a short-lived file, existing only so long as tool is executing.
 			# The Galaxy tool <configfile> tag writes this content directly as json data.
-
-			self.custom_rules = []			
-			if self.options.custom_rules:
-				with open(self.options.custom_rules,'r') as rules_handle:
-					lines = rules_handle.readlines()
+			#with open(self.options.custom_rules,'r') as rules_handle: print  rules_handle.read()
 			
-				for line in lines:
-					print line
-					linesplit = line.strip().split('\t',2) # remaining tabs are within rule content
-					if len(linesplit) == 3:
-						(row,drop,rules) = linesplit 
-						self.custom_rules.append({
-							'row':row,
-							'drop': 0 if drop == 'False' else int(drop),
-							'rules': rules.decode('base64')
-						})
-			else:
-
-				with open(self.options.plain_rules,'r') as rules_handle:
+			with open(self.options.custom_rules,'r') as rules_handle:
+				lines = rules_handle.readlines()
+			
+			self.custom_rules = []
+			for line in lines:
+				linesplit = line.strip().split('\t',2) # remaining tabs are within rule content
+				if len(linesplit) == 3:
+					(row,drop,rules) = linesplit 
 					self.custom_rules.append({
-						'row': 'Processing:0',
-						'drop': 0,
-						'rules': rules_handle.read()
+						'row':row,
+						'drop': 0 if drop == 'False' else int(drop),
+						'rules': rules.decode('base64')
 					})
+					#print self.custom_rules[-1]
 			
 			# Using this to convert "f1 (a f2 (c d))" into python nested array [f1 [a,  f2 [c, d]]]
 			# Could be improved to handle dissemble() fn too.
@@ -709,7 +721,7 @@ class RCQCInterpreter(object):
 				section, row = rule_group['row'].split(":") #Contains section and row of rule to modify.
 				row =  row.strip() # Can be "None"
 				
-				for ruleset in self.namespace['rulesets']:
+				for ruleset in self.namespace['sections']:
 					if ruleset['name'] == section:
 						rule_section = ruleset['rules']
 				if rule_section == None:
@@ -723,17 +735,18 @@ class RCQCInterpreter(object):
 				parsed_rules = self.dissemble(parsed_ruleset)
 
 				for ptr2, parsed_rule in enumerate(parsed_rules):
-					print "Parsed new rule: " , parsed_rule	
-					if row == "None": #If no row given, append rule.
+					if row == 'None' or row == None or row == '': #If no row given, append rule.
 						rule_section.append(parsed_rule)
+						print 'Appended new rule in %s : %s ' % (section, parsed_rule)
 					else: # Insert rule in right spot in report's rulebase. 
 						rule_section.insert(int(row)+ptr2+1, parsed_rule)
+						print 'Inserted new rule in %s: %s ' % (section, parsed_rule)
 
 				# Now drop any rules (working from highest row rule mod to lowest).
 				if rule_group['drop'] > 0:
 					if row == "None":
 						stop_err('In order to delete a number of rules, one must select starting rule row using "At rule" input.')			
-					print "dropping ", row, rule_group['drop']		
+					print "Dropping ", row, rule_group['drop']		
 					del rule_section[int(row) : int(row) + rule_group['drop']]
 							
 				# Build crude rule index for easy reference in report (i.e. set Z because of rule X,Y).
@@ -749,46 +762,47 @@ class RCQCInterpreter(object):
 
 
 		if self.options.save_rules_path:
-			# Only the rulesets part of a rulefile object can change; the other attributes are copied from ruleset file.
-			rulefileobj['rulesets'] = self.namespace['rulesets'] 
+			# Only the sections part of a rulefile object can change; the other attributes are copied from ruleset file.
+			rulefileobj['sections'] = self.namespace['sections'] 
 			with (open(self.options.save_rules_path,'w')) as output_handle:
 				output_handle.write(json.dumps(rulefileobj,  sort_keys=True, indent=4, separators=(',', ': ')))
 
-		# TESTING: INFIX OPERATORS
 		# Now, since they're saved, go back over rules and convert any infix expressions to prefix
-		for rule_section in self.namespace['rulesets']:
+		for rule_section in self.namespace['sections']:
 			if 'rules' in rule_section:
 				for (ptr, rule) in enumerate(rule_section['rules']):
-					rule_section['rules'][ptr] = self.infixToPrefixRewrite(rule)
-					#print rule_section['rules'][ptr] 
+					rule_section['rules'][ptr] = self.infixToPrefix(rule)
 
-	def infixToPrefixRewrite(self, rule): # given rule is always an array
+	def infixToPrefix(self, rule): # given rule is always an array
 		"""
 		Revises any rule so that any [a fn b] is rewritten [fn a b] , recursively.
-		2 cases: bracketed expression: [abs 1 + 2 + 3]
-		or function with brackets[abs [ 1 + 2 + 3]]
+		No operator precedence except by left to right evaluation.
 		"""
-		change = True
-		while change:
-			change = False
-			if len(rule) > 2 and isinstance(rule[1], basestring ) and rule[1] in RCQC_OPERATOR_3:
-				# Revises function call so it is in prefix notation				
-				rule = [ [ RCQC_OPERATOR_3[ rule[1] ] ,rule[0], rule[2] ] ] + rule[3:]
-				change = True
-				
-			if len(rule) > 3 and isinstance(rule[2], basestring ) and rule[2] in RCQC_OPERATOR_3:
-				rule = [rule[0], [ RCQC_OPERATOR_3[ rule[2] ] ,rule[1], rule[3] ] ] + rule[4:]
-				change = True
-			
-		for ptr, term in enumerate(rule):
+		if not isinstance(rule, list): return rule
+		
+		ptr = 0
+		while ptr < len(rule):
+			term = rule[ptr]
 			if isinstance(term, list ): 
-				rule[ptr] = self.infixToPrefixRewrite(term)	
-				while len(rule[ptr]) == 1:
-					if isinstance(rule[ptr][0], list ):  # Simplify ((((fn a b))))
-						rule[ptr] = rule[ptr][0]
-					else:
-						break
+				rule[ptr] = self.infixToPrefix(term)
+				term = rule[ptr]
 
+			# [op a ...] => [ [op a] ...]
+			if isinstance(term, basestring) and term in RCQC_OPERATOR_2 and ptr < len(rule) - 1:
+				rule[ptr] = [ RCQC_OPERATOR_2[term], self.infixToPrefix( rule[ptr + 1] ) ]
+				del rule[ptr+1]
+			
+			# [a op b ...] => [ [op a b] ... ]  .  Note syntax error if "a" is an op too.
+			if ptr < len(rule) - 2:
+				term1 = rule[ptr+1]
+				if isinstance(term1, basestring) and term1 in RCQC_OPERATOR_3:
+					rule[ptr] = [ RCQC_OPERATOR_3[ term1], self.infixToPrefix( rule[ptr] ),  self.infixToPrefix( rule[ptr+2] ) ]
+					del rule[ptr+1: ptr+3]
+				
+			ptr += 1
+			
+			while len(rule) == 1 and isinstance(rule[0], list ):  # Simplify ((...)) => (...)
+				rule = rule[0]
 		return rule
 		
 		
@@ -823,12 +837,8 @@ class RCQCInterpreter(object):
 		return myList
 
 	def getAtomicType(self, item):
-		#item = item.encode('utf8') # parse returns only unicode; better for matching quotes?
-		#item = str(item) # BASIC ASCII FOR NOW
-		
 		# All items having quotes are taken as literal strings
-		if item[0] == '"' and item[-1] == '"': # Drop quotes around term; it remains a string.
-			# item = item[1:-1]
+		if len(item) > 0 and item[0] == '"' and item[-1] == '"': # Drop quotes around term; it remains a string.
 			pass
 		else: # See if term should be converted to number / boolean
 			item = RCQCStaticFnExtension.parseDataType(item)
@@ -850,9 +860,9 @@ class RCQCInterpreter(object):
 
 			(file_path, file_name, file_type) = item.strip().split(":")
 			fileObj = {
-				'file_name': file_name,
-				'file_path': file_path,
-				'file_type': file_type
+				'name': file_name,
+				'value': file_path,
+				'type': file_type
 			}
 			self.namespace['files'].append(fileObj )
 			self.namespace['file_names'][file_name] = fileObj
@@ -891,95 +901,85 @@ class RCQCInterpreter(object):
 		Search self.namespace for appropriate path, and create it if necessary.  Used by store(...,location), 
 		"""
 		if not isinstance(myName, basestring):
-			raise TypeError ("Problem: getNamespace() given a non-string argument for location")
+			raise TypeError ("Problem: getNamespace() given a non-string argument for location:", myName, type(myName) )
+		
+		# Retrieval of shortcut variable name .z when original name is x.y.z		
+		if myName[0] == '/':
+			print ('ALERT: "%s" not matched to namespace so it is now a string constant.  Perhaps it didn\'t get set?' % myName)
+			return myName
 		
 		focus = self.namespace
 		splitName = myName.split('/')
-		# Retrieval of shortcut variable name .z when original name is x.y.z		
-		if myName[0] == '/':
-			if len(myName) == 1:
-				raise ValueError ("Problem: given location is just an empty path '/'")
-		
-			if len(splitName)  == 2: 
-				lastTerm = splitName[-1]
-				if lastTerm in self.namespace['name_index']:
-					#print "Found (_, %s)" % lastTerm
-					return (self.namespace['name_index'][lastTerm], lastTerm)
-				else:
-					print ('ALERT: "%s" not found in namespace so it is now a string constant.  Perhaps it didn\'t get set?' % lastTerm)
-			return myName
-
+		ptrNextLast = len(splitName)-1
 		for (ptr, part) in enumerate(splitName):
-			if ptr == len(splitName)-1:
-				if not isinstance(focus, dict):
-					raise TypeError('The namespace path "%s" isn\'t a dictionary but it needs to be.  Did a rule previously set it to a constant?' % '/'.join(splitName[0:ptr]) )
+			if not isinstance(focus, dict):
+				raise TypeError('The namespace path "%s" doesn\'t point to a dictionary.  Was it previously set to a constant?' % '/'.join(splitName[0:ptr]) )
 				
-				# Abbreviated name can't be numeric (an array index), and it can't be a string-replace % variable
-				if isinstance (part, basestring) and not part.isdigit() and not '%(' in part:
-					if DEBUG > 0: print ('Overwriting "/%s"' if part in self.namespace['name_index'] else 'Setting "/%s"') % part
-					self.namespace['name_index'][part] = focus
-
-				return (focus, part)
-				
+			if not part in focus:
+			
+				# If first item is a nickname, start search from there.
+				if ptr == 0:
+					(parent, returnable) = self.getNickname(part, True)
+					if returnable:
+						focus = parent
 			
 			if part in focus:
-				print "At: ", part 	
-				focus = focus[part] # Advance along path
-			else: # Just given a key to create as a new dictionary/
-				focus[part] = {} # ISSUE: do we create a dictionary, an ordered dictionary  or a list?
+			
+				# Every part of path except for root child is given a nickname if it hasn't been seen before (if it isnt a number or %(xxx) expression
+				if ptr > 0 and not part in self.namespace['name_index']:
+					self.setNickname(focus, part)
+			
+				# At y in ...x/y/z path:
+				if ptr == ptrNextLast:
+					return (focus, part)
+				
 				focus = focus[part]
+				continue
+				 
+			# At y in ...x/y/z path:
+			if ptr == ptrNextLast:
+				self.setNickname(focus, part)
+				return (focus, part)
+			
+			#Not at last place in path, so create a dictionary item for part
+			focus[part] = OrderedDict() #Its left to other iterators to set up arrays.
+			self.setNickname(focus, part)
 
+			# Advance along path
+			focus = focus[part] 	
+		
 
-	def namespaceReadValue(self, myName):
+	def namespaceReadValue(self, myName, existsFlag = False):
 		"""
 		Attempts to find value in appropriate path, and return that object or value;
 		if part "b" in "a/b/c" is numeric, will check to see if "a" is an array. 
-		
 		If whole path is not found, will return myName as a literal.
-		
 		Assumes all a/b{name}/c substitutions have already been done.
-		
-		TESTING: NO LEADING SLASH FOR ABBREVIATION:
-		Means "report" can get confused with bottom level variable if someone set that.
+		Means top level variables superceed any previous nicknames established via leaf store()
 		Abbreviations are checked for top-level match before bottom-level match.
+		If existFlag == True, return whether or not given variable exists.
 		"""
-		if not isinstance(myName, basestring):
+		if not isinstance(myName, basestring) or len(myName) == 0 or myName[0] == '/' or ' ' in myName:
 			return myName
-		
-		if len(myName) == 0:
-			return ""
-			
-		focus = self.namespace		
-		
-		if not '/' in myName:
-			if myName in focus: # Check for root variable reference first
-				return focus[myName]
-			
-			# Check for (latest) leaf variable reference
-			(reference, returnable) = self.getNickname(myName)
-			if returnable:
-				return reference
-		
-		
+				
 		splitName = myName.split('/')
-
-		# Determine if we are looking at an abbreviation "/[leaf variable name]"
-		# PHASE THIS OUT ??? Above catches abbreviations without leading slash.
-		if myName[0] == '/':
-			if len(splitName) == 2: 
-				(reference, returnable) = self.getNickname(splitName[1])
-				if returnable:
-					return reference
-			return myName # No nickname so returning literal "/whatever".
+		focus = self.namespace	
 
 		#Here we have a path with slashes
 		for (ptr, part) in enumerate(splitName):
+		
 			if focus != None:
 				if isinstance(focus, dict):
 					if part in focus:
 						focus = focus[part] # Advance along path
 						continue
-						
+					#If first term is nickname, see if we can pick up path from it
+					if ptr == 0:
+						(reference, returnable) = self.getNickname(part)
+						if returnable:
+							focus = reference
+							continue
+
 				if isinstance(focus, list):
 					if part.isnumeric():
 						partint = int(part)
@@ -987,26 +987,56 @@ class RCQCInterpreter(object):
 							focus = focus[partint]
 							continue
 
+					if existsFlag: return False					
 					raise TypeError('The location namespace path "%s" is a list, but it doesn\'t have position "%s" !' % ('/'.join(splitName[0:ptr]), part) )
-
+			
+			if existsFlag: return False
 			return myName # Term is a literal 
 
+		if existsFlag: return True
 		return focus # now a value / object
 	
 	
-	def getNickname(self, nickname):
+	def getNickname(self, nickname, parent_flag=False):
 		""" 
 		Whenever the "store(... location)" function is called, a reverse lookup is set up on the leaf c part of the location's a/b/c path to point to the full path.  Thus c can be a nickname to the latest use of the term.  The only issue arises if c is overwritten by other processes that happen to store paths with the same c leaf. In such cases programmers must change rule references to a leaf name, or stick to the full path a/b/c reference for that variable.
+		INPUT
+		parent_flag: boolean indicating that parent dict is desired.
 		"""
-		if nickname in self.namespace['name_index']: #find shortcut "/myname" type variable references
+		if nickname in self.namespace['name_index']: #find shortcut "myname" type variable references
 			parentDict = self.namespace['name_index'][nickname]
 			if DEBUG: print 'Found "/%s"' % nickname
+			# Verify, since sometimes something can change nickname's entry/ data structure path
 			if nickname in parentDict:
-				return (parentDict[nickname], True)
-			else: # indicates something changed nickname's entry/ data structure path
+				if parent_flag == False:
+					return (parentDict[nickname], True)
+				else:
+					return (parentDict, True)
+			else: 
 				self.namespace['name_index'].pop(nickname)
 		
 		return (None, False)
+
+
+	def setNickname(self, parent, nickname):
+		"""
+		Abbreviated name can't be numeric (an array index), and it can't be a string-replace % variable
+		"""
+		if not nickname.isdigit() and not '%(' in nickname:
+			if DEBUG > 0: print ('Overwriting "%s"' if nickname in self.namespace['name_index'] else 'Setting "%s"') % nickname
+			self.namespace['name_index'][nickname] = parent
+	
+	# Goes through given hierarchy, creating namespace references. 
+	# Note, if a name shows up a few times, only latest will get nickname pointer.
+	def setNicknames(self, term, termdict):
+		self.namespace['name_index'][term] = termdict
+		if isinstance(termdict[term], dict):
+			for term2 in termdict[term]:
+				self.setNicknames(term2, termdict[term])
+		
+		
+	def getSelfDir(self): 
+		return os.path.dirname(sys._getframe().f_code.co_filename)
 		
 		
 	def get_command_line(self):
@@ -1030,24 +1060,27 @@ class RCQCInterpreter(object):
 
 		parser.add_option('-i', '--input', type='string', dest='input_file_paths',  
 		help='Provide input file information in format: [file1 path]:[file1 label][file1 suffix][space][file2 path]:[file2 label]:[file2 suffix] ... note that labels can\'t have spaces in them. ')
+
+		parser.add_option('-d', '--daisychain', type='string', dest='daisychain_file_path',  
+		help='Provide file path of previously generated report to load into report/ namespace.  Used to create a cumulative report.')
 		
 		parser.add_option('-o', '--output', type='string', dest='output_json_file',  
 		help='Output report to this file, or to stdout if none given.')
 
-		parser.add_option('-r', '--rules', type='string', dest='rules_file_path',  
-		help='Read JSON format recipe rules from this file.')
+		parser.add_option('-r', '--recipe', type='string', dest='recipe_file_path',  
+		help='Read recipe script from this file.')
 
-		parser.add_option('-e', '--execute', type='string', dest='execute',  default='',
-		help='Ruleset sections to execute.')  
+		parser.add_option('-j', '--json', type='string', dest='json_object',  
+		help='A JSON object to place directly in top level namespace.')
 		
-		parser.add_option('-c', '--custom', type='string', dest='custom_rules', help='Read and incorporate custom rules from a file into a json recipe.  Helpful for testing variations.')
-
-		parser.add_option('-p', '--plain', type='string', dest='plain_rules',  
-		help='Read recipe rules in plain format from this file.')
+		parser.add_option('-O', '--options', type='string', dest='optional_sections',  default='',
+		help='Optional sections to execute.')  
+		
+		parser.add_option('-c', '--custom', type='string', dest='custom_rules', help='Provide custom rules in addition to (or to override) rules from a file.  Helpful for testing variations.')
 
 		parser.add_option('-s', '--save_rules', type='string', dest='save_rules_path', help='Save modified ruleset to a file.')
 
-		parser.add_option('-d', '--debug', action='store_true', dest='debug', help='Provides more detail about rule execution on stdout.')
+		parser.add_option('-D', '--debug', action='store_true', dest='debug', help='Provides more detail about rule execution on stdout.')
 
 		return parser.parse_args()
 

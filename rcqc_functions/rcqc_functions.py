@@ -1,19 +1,26 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 import sys
+import fnmatch
 import re
-import json
 import os.path
 import datetime
 import collections
 import dateutil.parser as dateparser
-try:
-    from collections import OrderedDict
-except ImportError:
-    from ordereddict import OrderedDict
-    
-# http://stackoverflow.com/questions/4473184/unbound-method-f-must-be-called-with-fibo-instance-as-first-argument-got-cla
-DEBUG = 0
+import math
+import operator
 
+try: #Python 2.7
+	from collections import OrderedDict
+except ImportError: # Python 2.6
+	from ordereddict import OrderedDict
+	
+try:	
+	import simplejson as json
+except ImportError: # Python 2.6
+    	import json
+    	
+DEBUG = 0
 
 def stop_err( msg, exit_code=1 ):
 	sys.stderr.write("%s\n" % msg)
@@ -21,6 +28,7 @@ def stop_err( msg, exit_code=1 ):
 	
 """
 	The functions below primarily exist for use in user's rulesets, but a few are also used directly in report_calc.py engine.
+	http://stackoverflow.com/questions/4473184/unbound-method-f-must-be-called-with-fibo-instance-as-first-argument-got-cla
 """
 ################################### STATIC FUNCTIONS ################################
 
@@ -30,6 +38,15 @@ class RCQCStaticFnExtension(object):
 	PRECEED THESE METHODS WITH @staticmethod, or else you will receive 
 	"TypeError:unbound method X must be called with RCQCStaticFnExtension instance as first argument..."
 	"""	
+
+		
+	@staticmethod
+	def basename(string):
+		"""
+		basename(string) -- Return file name and suffix of file path
+		"""	
+		return os.path.basename(string)
+		
 		
 	@staticmethod
 	def between(compare, lower_bound, upper_bound):
@@ -37,8 +54,8 @@ class RCQCStaticFnExtension(object):
 		between(compare, lower_bound, upper_bound) -- True if lower_bound <= compare <= upper_bound.
 		This range test works for both string and numeric data. 
 		"""	
-		return ( compare >= lower_bound and compare < upper_bound)
- 
+		return ( compare >= lower_bound and compare < upper_bound )
+
  
  	@staticmethod
 	def join(delimiter, *items):
@@ -47,6 +64,7 @@ class RCQCStaticFnExtension(object):
 		Extend this to integers etc?
 		"""
 		return delimiter.join(items)	
+		
 		
 	@staticmethod	
 	def getHtml(content, title='', depth=0): 
@@ -67,7 +85,7 @@ class RCQCStaticFnExtension(object):
 			# Sorting keys so that tables (iterable within an iterable)
 			if  isinstance(content, dict): 
 				#Sorts dictionary keys alphabetically but with non-atomic (object) items last in list.
-				content_iterable = 	iter(sorted(content.items(), key=lambda (mykey, myvalue): str(hasattr(myvalue, '__iter__')) + str(mykey) )) 
+				content_iterable = 	iter(sorted(content.items(), key=lambda (mykey, myvalue): hasattr(myvalue, '__iter__') )) 
 				formating['content'] = '\n'.join([RCQCStaticFnExtension.getHtml(value, key, depth+1) for (key, value) in content_iterable])
 					
 			else: # list here.
@@ -137,10 +155,17 @@ class RCQCStaticFnExtension(object):
 		iif (conditional, true_expression, false_expression) -- If conditional is true, evaluate true_exp, else evaluate false_exp
 		Note the expressions have already been evaluated appropriately by interpreter.  What this does is RETURN the 2nd or 3rd expression.
 		"""
-		print "iif: ",x,y,z
 		return y if x else z
 
 
+	@staticmethod	
+	def all(*arg): 
+		"""
+		all (statement ...) -- executes each given function unconditionally. Implicit in ( fn1(), fn2(), ...) expression.
+		"""
+		return arg
+		
+		
 	@staticmethod
 	def iterValue(iterator):
 		"""
@@ -174,17 +199,18 @@ class RCQCStaticFnExtension(object):
 
 				
 	@staticmethod	
-	def last(self, location): 
+	def last(location): 
 		"""
 		last(location) -- Returns last element of existing list at location, or None.
 		"""
-		return  getitem(location, -1) if isinstance(location, list) else None
+		#print "LAST ", location, type(location),getitem(location, -1)
+		return  location[-1] if isinstance(location, list) else None
 
 
 	@staticmethod
 	def nameCamelCase(myString, default='no_label'):
 		"""
-		nameCamelCase(st) -- Returns camel case version of given string.
+		nameCamelCase(string) -- Returns camel case version of given string.
 		"""
 		myString = myString.replace('#','_count_').replace("+",'_plus_').replace('%','_percent_')
 		output = ''.join(x for x in myString.title().strip() if x.isalnum())
@@ -210,10 +236,9 @@ class RCQCStaticFnExtension(object):
   
 		
 	@staticmethod
-	def note(myString):
+	def note(*arg):
 		"""
-		note(string) -- for comments about rules
-		Ignores its parameter.  Comments can be included that way.
+		note(text, text, ...) -- To make comments.  A statement can be commented out this way too.
 		"""
 		return True
 
@@ -313,54 +338,75 @@ class RCQCStaticFnExtension(object):
 
 		return dateparser.parse(adate, fuzzy=True) #adateP =
 		# return calendar.timegm(adateP.timetuple()) # linux time
-
-
-	@staticmethod
-	def sorted(alist):
-		"""
-			sorted(list) -- Applies standard sort to list.
-			Future: enhance with other python sorted() attributes?
-		"""      
-		for item in sorted(alist):
-			yield {'value': item}		# Add ROW too?
-		
+	
 		
 	@staticmethod
-	def statisticN(numlist, split=50):
+	def statisticN(numlist, split=50, genome_length=0):
 		"""
-		statisticN(numeric_array, split=50) -- By default, the N50 value of the passed array of numbers. 
-		Based on the Broad Institute definition: https://www.broad.harvard.edu/crd/wiki/index.php/N50
-		Added return of integer rather than float.
+		statisticN(numeric_array, split=50, genome_length=None) -- By default, the N50 statistic of the passed array of contig lengths.
+
+		The Broad Institute definition (https://www.broad.harvard.edu/crd/wiki/index.php/N50) is based on a real number statistic that allows for a "split" case, but this is not pertinent to genomic assembly contigs, so we have used a simpler version, namely "N50 is the length of the smallest contig in the set that contains the fewest (largest) contigs whose combined length represents at least 50% of the assembly. The N50 statistics for different assemblies are not comparable unless each is calculated using the same combined length value." This is described in these sources: 
+		
+		http://jermdemo.blogspot.ca/2008/11/calculating-n50-from-velvet-output.html
+		https://en.wikipedia.org/wiki/N50,_L50,_and_related_statistics
+		http://seqanswers.com/forums/showthread.php?p=41420
+		
+		INPUTS
+		genome_length: Optional: reference genome length can be provided.
 		"""
 		if DEBUG: print numlist
+	 	
 		try:
-			numlist.sort()
+			sorted_contigs = sorted(numlist, reverse=True)
 		except: 
-			raise AttributeError ("statisticN didn't get a list of numbers to work on! Was input a defined namespace name?")
+			raise AttributeError ("statisticN() didn't get a list of numbers to work on! ")
 	 		return None
 	 	
-	 	splitN = 100/(100-split)
+	 	assembly_length = math.fsum(sorted_contigs)
+	 	n_length = assembly_length*split/100
 	 	
-		newlist = []
-		for x in numlist :
-			newlist += [x]*x
-		# take the mean of the two middle elements if there are an even number
-		# of elements.  otherwise, take the middle element
-		if len(newlist) % 2 == 0:
-			medianpos = len(newlist)/2  
-			return int( float(newlist[medianpos] + newlist[medianpos-1]) /splitN) 
-		else:
-			medianpos = len(newlist)/splitN
-			return newlist[medianpos]
-	
+	 	cumulative = 0
+	 	for ptr, contig_length in enumerate(sorted_contigs):
+	 		cumulative += contig_length
+	 		if cumulative >= n_length:
+	 			break
+
+ 		data = OrderedDict()
+ 		data[ 'contig_N' + str(split)] = contig_length
+ 
+		if genome_length > 0:
+	 		
+	 		n_length = genome_length*split/100
+		 	cumulative = 0
+		 	for ptr, contig_length in enumerate(sorted_contigs):
+		 		cumulative += contig_length
+		 		if cumulative >= n_length:
+		 			break
+	 		
+	 		data['contig_NG' + str(split) ] = contig_length
+
+		data[ 'contig_L' + str(split)] = ptr
+	 				
+		if genome_length > 0:
+	 		data['contig_LG' + str(split) ] = ptr	
+	 					 	
+	 	return data
+
 	
 	@staticmethod
 	def parseInt(value):
 		"""
-		parseInt(number) -- Convert number into an integer
+		parseInt(number) -- Convert number (rounded) into an integer
 		"""
-		return int(value)
+		return int(round(value))
 	
+	
+	@staticmethod
+	def round(value, precision = 0):
+		"""
+		round(number, precision = 0) -- Round number to given precision
+		"""
+		return round(value, precision)
 	
 	@staticmethod
 	def pageHtml(html_content, title="Data"):
@@ -460,23 +506,13 @@ class RCQCStaticFnExtension(object):
 				yield myDict
 	
 	
-	@staticmethod
-	def readFileCollection(file_collection):	
+	@staticmethod	
+	def getRegExp(string): 
 		"""
-		readFileCollection(file_collection) -- return contents of each file in collection line by line.
-		NOTE: This can read files from list user has specified, so system files that galaxy has permission to read.
-		ROW is current line being read by iterable.
+		getRegExp(string) -- Returns compiled regular expression.
 		"""
-		for myFile in file_collection:
-			counter = -1
-			with open(myFile['file_path'], 'r') as input_file_handle:
-				counter = counter + 1
-				yield {
-					'value': input_file_handle.read(),
-					'ROW': counter, 
-					'name': myFile['file_name'] 
-				}
-			
+		return re.compile(string)
+	
 	
 	@staticmethod	
 	def getTabular(content, column='data'): 
@@ -532,7 +568,7 @@ class RCQCStaticFnExtension(object):
 			raise ValueError ("importTabular() didn't receive iterable text for input.")
 			
 		for row, line in enumerate(content):
-			print row, line
+
 			if row >= skip_rows:
 				# Assuming each item of content is a line of text
 				if isinstance(line, basestring) and len(line) > 0:
@@ -559,6 +595,31 @@ class RCQCStaticFnExtension(object):
 							myDict[item] = RCQCStaticFnExtension.parseDataType( columnData[column] )
 						yield myDict
 
+
+	@staticmethod	
+	def exportTabular(content, label="", depth = 0): 
+		"""
+		exportTabular(content) -- export namespace (hierarchy) into tabular string format (rows end in carriage returns).
+		"""
+		output = ''
+		
+		if isinstance(content, dict):
+			if len(label) >0 :
+				output = depth*'	'+str( label if depth !=1 else label.upper())+'\n'
+			# As with HTML display, put more complex items at bottom.
+			content_iterable = 	iter(sorted(content.items(), key=lambda (mykey, myvalue): hasattr(myvalue, '__iter__') )) 
+			for (key, value) in content_iterable:
+				output += RCQCStaticFnExtension.exportTabular(value, key, depth+1)
+		elif isinstance(content, list):
+			if len(label) >0 :
+				output = depth*'	'+str(label if depth !=1 else label.upper())+'\n'
+			for ptr, item in enumerate(content):
+				output += RCQCStaticFnExtension.exportTabular(item, ptr, depth+1)
+		else:
+			output = depth*'	'+str(label)+'	'+ str(content) + '\n'
+			
+		return output
+			
 	@staticmethod
 	def format(myFormatString, dictOrValues):
 		"""
@@ -607,34 +668,51 @@ class RCQCClassFnExtension(object):
 		Since function parameters like location arrive evaluated, location is either a namespace node, 
 		or it is a x/y/z path where x/y could already exist in namespace, and z is a new key.  Or x/y is new too.
 		"""
-
+		
 		if isinstance(location, basestring):
-			location = self.callerInstance.namespaceSearchReplace(location)
+
+			#location = self.callerInstance.namespaceSearchReplace(location)
 			(obj, key) = self.callerInstance.getNamespace(location)
 			if not key in obj: #Note, if key happens to be in obj but isn't a list that will cause problems.
 				obj[key] = []
 				print "append() setting up array for /" + key
 				self.callerInstance.namespace['name_index'][key] = obj  
-			location = obj[key]
+			location = obj[key] # Should be dictionary or array here.
 
 		if  hasattr(expression, '__iter__'):
 			value = None # might be empty iterator
 			for item in expression: 
 				if DEBUG > 0: print "append item", item
-				if isinstance(item, dict):
-					if 'value' in item:
-						value = item['value']
-					else:
-						value = item
-				else:
-					value = item
+				# append one dictionary onto another = copy
+				if isinstance(location, dict): # CHECK IF Expression is dict too?
+					location[item] = expression[item]
+					continue	
+				elif isinstance(item, dict) and 'value' in item:
+					location.append(item['value'])
+					continue
+				value = item
 				location.append(value)
+				
 			return value
-		else:
-			obj[key].append(expression)
-			return expression
+
+		location.append(expression)
+		return expression
+
 		
+	def sorted(self, location):
+		"""
+			sorted(list) -- Applies standard sort to list.
+			Future: enhance with other python sorted() attributes?
+		"""      
+		if isinstance(location, basestring):
+			(obj, key) = self.callerInstance.getNamespace(location)
+			location = obj[key]
+			
+		for item in sorted(location):
+			yield {'value': item}		# Add ROW too?
+		#return sorted(alist)
 		
+			
 	def iterate(self, iterator, location, *functions):
 		"""
 		iterate (iterator location fn1 ... fn2 etc.) -- Iterate through iterator's dictionary, storing it in location, and then executing each function expression. 
@@ -653,8 +731,7 @@ class RCQCClassFnExtension(object):
 			found = found + 1
 			self.callerInstance.namespace['iterator'][fnDepth] = myDict
 			if isinstance(location, basestring): # It should always be this.
-				location2 = self.callerInstance.namespaceSearchReplace(location)
-				(obj, key) = self.callerInstance.getNamespace(location2)
+				(obj, key) = self.callerInstance.getNamespace(location)
 				obj[key] = myDict
 				self.callerInstance.namespace['name_index'][key] = obj  #abbreviated name
 			
@@ -664,7 +741,7 @@ class RCQCClassFnExtension(object):
 		if  found ==0: 
 			print "Note, no iterations to do. "
 			return False		
-		print "Iterated: ", found, "times."
+		if found > 1: print "Iterate() done ", found, " times."
 		return True
 		
 		
@@ -688,23 +765,88 @@ class RCQCClassFnExtension(object):
  		return None
  
  
-	def getFilePath(self, file_name):
+ 	def iStatBP(self, location, fastaRow):
 		"""
-		getFilePath(file_name)
-		Match given file_name to list of input files, and return file path
-		FUTURE: allow wildcard in name
+		iStatBP(statsDict, fastaRow) -- At statsDict location, builds a list of base-pair related statistics for subsequent rows of fasta sequence data.  This "inplace" function uses statsDict in situ, so does a running total on its various stats. 
+			
+		Future: 'GATTCA' type buckets		
+		"""	
+
+ 		if len(fastaRow) >0:
+ 			if not isinstance(location, dict):
+ 				if isinstance(location, basestring):
+					(obj, key) = self.callerInstance.getNamespace(location)
+					location = obj[key] # by reference
+				else:
+					raise ValueError ("Error: iStatBP() function wasn't given a good location for first parameter: %s" % location)
+ 		
+			buckets = ['G','C','A','T']
+			if not 'A' in location: #indicates it hasn't been initialized.
+				#obj[key] = OrderedDict()
+				for item in buckets:
+					location[item]=0
+				location['total'] = 0
+			
+			#Tally buckets.  Allows for N ,U, * etc. to be identified
+			for char in fastaRow:
+				char = char.upper()
+				location[char] = (location[char] + 1) if char in location else 1 
+
+			location['total'] += len(fastaRow)
+			#Might not be at last line but calculate these anyways, in case we are:
+			for item in buckets:
+				location[item + '%'] = int(round(100*operator.truediv(location[item], location['total'] ) ))
+				
+			location['GC_content%'] = int(round(100*operator.truediv(location['G'] + location['C'], location['total'] )) )
+			
+		return location
+ 
+ 
+	def clear(self, location):
+		"""
+		clear(location) -- clear out given data type.  String goes to '', number to 0, array to [], and object (and new item) to {}.
+		"""	
+		#location1 = self.callerInstance.namespaceSearchReplace(location)
+		(obj, key) = self.callerInstance.getNamespace(location)
+		value = OrderedDict() #Allows clear expression to establish a new dictionary and nickname.
+		if key in obj:
+
+			oldValue = obj[key]
 		
+			if isinstance(oldValue, dict):
+				value = OrderedDict()
+			elif isinstance(oldValue, list):
+				value = []
+			#Location is a literal below.  same as store(0, location). 
+			elif  isinstance(oldValue, numbers.Number):
+				value = 0
+			elif isinstance(oldValue, basestring):
+				value = ''
+			#other cases?
+			
+		self.callerInstance.storeNamespaceValue(value, location)
+		return location
+		
+		
+	def iterFiles(self, file_name):
+		"""
+		iterFiles(file_name) -- Match given file_name to list of input files, and return file path.  Name can have ? and * wildcards.
+
 		ISSUE?: Make secure by taking files/ list out of namespace area.
 		Then users can't insert their own absolute file paths in.
 		"""
-		found = False
+		found = 0
+		checked_files = []
 		for myFile in self.callerInstance.namespace['files']:
-			if myFile['file_name'] == file_name:
-				found = True
+			if fnmatch.fnmatch(myFile['name'], file_name):
+				found += 1
 				yield myFile
+			else:
+				checked_files.append(myFile['name'])
 		
-		if found == False:
-			error_text = 'Error: unable to open any input file named like "%s".' % file_name
+		# Issue, never gets to "Not found" spot?
+		if found == 0:
+			error_text = 'Error: unable to open any input file named like "%s". Input file list is: %s' % (file_name, str(checked_files) )
 			stop_err (error_text )
 
 
@@ -714,34 +856,38 @@ class RCQCClassFnExtension(object):
 		File must be supplied in input list.
 		"""
 		found = False
-		for myFile in self.getFilePath(file_name):
+		for myFile in self.iterFiles(file_name):
 			data = None
 			ptr = 0
-			with open(myFile['file_path'], 'r') as input_file_handle:
+			with open(myFile['value'], 'r') as input_file_handle:
 				found = True
-				if myFile['file_type'] == "json":	
-					data = json.load(input_file_handle)
+				if myFile['type'] == "json":	
+					data = json.load(input_file_handle, object_pairs_hook=OrderedDict)
 				else:		
 					# Text and tab-delimited		
 					data = input_file_handle.read()
 	
-				print "Loaded %s: %s characters" % (myFile['file_name'], len(data) )
-				yield {'value': data , 'ROW': ptr, 'name': myFile['file_name'] }
+				print "Loaded %s: %s characters" % (myFile['name'], len(data) )
+				yield {'value': data , 'ROW': ptr, 'name': myFile['name'] }
 				ptr = ptr + 1
 
 
-	def readFileByName(self, file_name):
+	def readFileByName(self, entity):
 		"""
-		readFileByName(file_name) --  Via an iterable, read each line of file given by file_name (into dictionary 'value' key).
-		File must be supplied in input list.  
-		Not applicable to JSON since that content has to be parsed as a whole.
+		readFileByName(entity) --  Via an iterable, read each line of file into a dictionary.
+		If input entity is:
+		- a string, apply iterFiles() to match to file name using glob retrieve iterable; 
+		- a dictionary, read its 'value' as file path
+		- otherwise assume it is an iterable file object.  
+		Not applicable to reading JSON since that content has to be parsed as a whole.
 		"""
 		found = False
-		for myFile in self.getFilePath(file_name):
-			with open(myFile['file_path'],'r') as file_handle:
+		for myFile in (self.iterFiles(entity) if isinstance(entity, basestring) else ([entity] if isinstance(entity, dict) else entity)):
+			with open(myFile['value'],'r') as file_handle:
 				found = True
+				print "READING: ", myFile['value']
 				for ptr,line in enumerate(file_handle):
-					yield {'value': line.strip('\n') , 'ROW': ptr, 'name': myFile['file_name'] }
+					yield {'value': line.strip('\n') , 'ROW': ptr, 'name': myFile['name'] }
 
 
 	def writeJsonFile(self, content, output_file_name):

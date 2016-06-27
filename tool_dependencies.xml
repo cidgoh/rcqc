@@ -3,9 +3,10 @@
 	<package name="rcqc" version="0.1.0">
 		<install version="1.0">
 			<actions>
-				<action type="setup_python_environment">
-					<package>https://pypi.python.org/packages/source/d/dateutils/dateutils-0.6.6.tar.gz#md5=2ba7fcac03635f1f1cad0d94d785001b</package>
-					<package>https://pypi.python.org/packages/source/p/pyparsing/pyparsing-2.0.6.tar.gz#md5=a2d85979e33a6600148c6383d3d8de67</package>
+				<action type="setup_virtualenv">
+					dateutils==0.6.6
+					pyparsing==2.0.6
+					simplejson==3.8.2
 				</action>
 			</actions>
 		</install>

@@ -1,0 +1,107 @@
+{  "title": "Spades QC Recipe v1.0",
+    "sections": [
+        { "name": "Ontology",
+            "@context": {
+                "assembly_genome_size": "http://purl.obolibrary.org/obo/GENEPIO_0001561",
+                "contig_count": "http://purl.obolibrary.org/obo/GENEPIO_0000093",
+                
+                "contig_N50": "http://purl.obolibrary.org/obo/OBI_0001941",
+                "contig_N99": "http://purl.obolibrary.org/obo/GENEPIO_0001570",
+                "contig_L50": "http://purl.obolibrary.org/obo/GENEPIO_0001633",
+                "contig_L99": "http://purl.obolibrary.org/obo/GENEPIO_0001774",
+                
+                "contig_NG50": "http://purl.obolibrary.org/obo/GENEPIO_0001631",
+                "contig_NG99": "http://purl.obolibrary.org/obo/GENEPIO_0001771",
+                "contig_LG50": "http://purl.obolibrary.org/obo/GENEPIO_0001773",
+                "contig_LG99": "http://purl.obolibrary.org/obo/GENEPIO_0001634",
+                
+                "contig_N50_QC_threshold": "http://purl.obolibrary.org/obo/GENEPIO_0001565",
+                "contig_N99_QC_threshold": "http://purl.obolibrary.org/obo/GENEPIO_0001566",
+                "contig_count_QC_threshold": "http://purl.obolibrary.org/obo/GENEPIO_0001571",
+                "contig_length_QC_threshold": "http://purl.obolibrary.org/obo/GENEPIO_0001630",
+                "genome_size_ratio_QC_threshold": "http://purl.obolibrary.org/obo/GENEPIO_0001564",
+                
+                "contigs": "http://purl.obolibrary.org/obo/SO_0001462",
+                "date": "http://purl.obolibrary.org/obo/IAO_0000416",
+                "genome_size_ratio": "http://purl.obolibrary.org/obo/GENEPIO_0001563",
+                "GC_content%": "http://purl.bioontology.org/ontology/MESH/D001482",
+			 
+                "reference_genome_identifier": "http://purl.obolibrary.org/obo/GENEPIO_0001562",
+                "reference_genome_size": "http://purl.obolibrary.org/obo/GENEPIO_0001560"
+            }
+        },
+        {	"name": "Settings",
+        	"rules": [
+        	     [ "note", "Reference genome data passed in via --json parameter"],
+      		[ "regexp_fasta_data", "=", [ "getRegExp", "^>(?P<id>[A-Za-z0-9_-]+)_[0-9]+\\slength_(?P<value>\\d+)_cov_(?P<cov>\\d+.?\\d*)_ID_(?P<contig_id>\\d+)" ] ]		
+		]
+        },
+        { "name": "Processing",
+		"rules": [
+			[ "note", "For each input file, call it 'contigItem', and read through it to find >[fasta definition line].  Match contents to regular expression length_XXX_cov_YYY_ID_ZZZ, and make an array out of the length numbers, etc. for stats."],
+			[ "iterate", "files" , "myFileIterator", 
+				[ "contigItemR", "=", ["raw/" , "+",  ["basename", "myFileIterator/value"] ] ],
+				[ "function", "Contig Stats"],
+				[ "function", "Quality control"]
+			]	
+		]
+        },
+         { "name": "Contig Stats",
+           "type": "function",
+		 "rules": [
+			[ "report/contigs/{contigItemR}/name", "=", "myFileIterator/name"],
+			[ "clear", "report/contigs/{contigItemR}/basepairs" ],
+			[ "iterate", [ "readFileByName", "myFileIterator" ], "myLineDict",
+				[ "iif", [ [ "getitem", "myLineDict/value", 0 ], "==", "\">\"" ],
+					[ 	
+						[ "process_fasta", "=", false],
+						[ "iterate" , [ "regexp", "myLineDict/value", "regexp_fasta_data" ], "tempDict",
+							[ "if", ["tempDict/value", ">=", "contig_length_QC_threshold" ],
+								[ "process_fasta", "=", true ],
+								[ "{contigItemR}/id", "=", "tempDict/id"],
+								[ "append", "tempDict/value", "{contigItemR}/contig_lengths"] ]
+						]
+					],
+					[ "if", "process_fasta", ["iStatBP", "basepairs", "myLineDict/value"] ]
+				]
+			],
+			[ "contig_lengths", "=", [ "sorted", "contig_lengths" ] ],
+
+			[ "{contigItemR}/min_contig_length", "=", "contig_lengths/0" ],
+			[ "{contigItemR}/max_contig_length", "=", ["last", "contig_lengths"] ],
+			[ "{contigItemR}/assembly_genome_size", "=", [ "parseInt", [ "fsum", "contig_lengths" ] ] ],
+			[ "{contigItemR}/contig_count" , "=", [ "length", "contig_lengths" ] ],
+			[ "if", "reference_genome_size" , ">", 0, 
+			     [ "{contigItemR}/genome_size_ratio", "=", [ "round", [ [ "abs", [ "assembly_genome_size", "-", "reference_genome_size" ] ], "/", "reference_genome_size" ], 2 ] ]
+			],
+			[ "append", [ "statisticN", "contig_lengths", 50, "reference_genome_size" ], "{contigItemR}" ],
+			[ "append", [ "statisticN", "contig_lengths", 99, "reference_genome_size" ], "{contigItemR}" ]
+
+            ]
+        },
+	{ "name": "Quality control",
+		"type": "function",
+		"rules": [
+
+			[ "if", [ "genome_size_ratio", ">", "genome_size_ratio_QC_threshold" ],
+				[ "fail", "\"qc\"", " {contigItem}: Failed genome size ratio threshold" ] ],
+			[ "if", [ "{contigItem}/contig_N50", "<", "contig_N50_QC_threshold" ],
+				[ "fail", "\"qc\"", " {contigItem}: Failed minimum N50 contig length threshold" ] ],
+			[ "if", [ "{contigItem}/contig_N99", "<", "contig_N99_QC_threshold" ],
+				[ "fail", "\"qc\"", " {contigItem}: Failed minimum N99 contig length threshold" ] ],
+			[ "if", [ "contig_count", ">", "contig_count_QC_threshold"],
+				[ "fail", "\"job\"", " {contigItem}: Failed maximum contig count threshold" ] ]
+            ]
+        },
+        {
+		"name": "Reporting",
+		"rules": [
+			[ "note", "report/@context", "=", "sections/0/@context" ],
+			[ "note", "writeFile", [ "pageHtml", [ "getHtml", "report", "My Report Widget" ] ], "report.html" ],
+			[ "writeFile", [ "exportTabular", "report", "My Report Widget"  ], "report.tabular" ],
+			[ "iconcat", "report_html",	[ "getHtml",  "report",  "My Tool Report"  ] ]
+            ]
+        }
+    ]
+}
+

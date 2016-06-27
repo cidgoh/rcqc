@@ -1,77 +1,105 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-import os, sys, json
+import os, sys, json, glob
 import inspect
 import operator
 import math
 
 # From http://code.activestate.com/recipes/66062-determining-current-function-name/
-self_dir = os.path.dirname(sys._getframe().f_code.co_filename)
-sys.path.append(self_dir)
+SELF_DIR = os.path.dirname(sys._getframe().f_code.co_filename)
+sys.path.append(SELF_DIR)
 import rcqc
 from rcqc_functions.rcqc_functions import RCQCClassFnExtension
 from rcqc_functions.rcqc_functions import RCQCStaticFnExtension
 
-DEBUG = 0
+DEBUG =0
 
-with open( self_dir + '/log.txt', 'w') as log_handle:
-	log_handle.write( "Starting ...\n")
+if DEBUG== 1:
+	with open( SELF_DIR + '/log.txt', 'w') as log_handle:
+		log_handle.write( "Starting ...\n")
 		
-rulesets = None
+sections = None
 rc_functions = None
 
 def log(message):
 	if DEBUG== 1:
-		with open( self_dir + '/log.txt', 'a') as log_handle:
+		with open( SELF_DIR + '/log.txt', 'a') as log_handle:
 			log_handle.write(message)
 
 def loglines(lines):
 	if DEBUG== 1:
-		with open( self_dir + '/log.txt', 'a') as log_handle:
+		with open( SELF_DIR + '/log.txt', 'a') as log_handle:
 			log_handle.writelines(lines)
 						
 # Populate list of rules. (rules_file is a HistoryDatasetAssociation)
-def get_rule_section(rules_file):
+def get_rule_section(recipe_file, rules_file):
 
-	global rulesets
+	global sections, SELF_DIR
 	log( "\nget_rule_section() ")
 	
 	items = []
-	
+
+	if recipe_file: #Construct an empty class
+		# See: http://jfine-python-classes.readthedocs.io/en/latest/type-name-bases-dict.html
+		rules_file = type('RecipeFile',(object,),{"file_name": recipe_file})()
+		log('got recipe ' + rules_file.file_name)
+		
 	if rules_file:
 		log(rules_file.file_name)
-		log( "\ngetRulesets()  ")
 
 		try:
-			with open(rules_file.file_name, 'r') as rules_handle:
+			with open(SELF_DIR + '/' + rules_file.file_name, 'r') as rules_handle:
 				rulefileobj =  json.load(rules_handle)
-				log("Rule file json parsed")
-				rulesets = rulefileobj['rulesets']
-				log("\nRule sets loaded")
-				#loglines(rulesets)
+				log("Recipe file json parsed")
+				sections = rulefileobj['sections']
+				log("\nRecipe loaded")
+				#loglines(sections)
 				
 		except Exception,e: 
 			log(str(e))
 			raise e
 			
-		for section in rulesets:
+		for section in sections:
 			log('\n' + section['name'])
-			items.append( [ section['name'], section['name'], False ])
+			if 'type' in section and section['type'] == 'optional':
+				items.append( [ section['name'], section['name'], False ])
 	
 	return items
 
+
+def get_recipe_list():
+	""" This is a list of built-in recipes, sitting in the recipes/ subfolder
+	"""
+	global SELF_DIR
+	items = []
+	for file_path in glob.glob(SELF_DIR + '/recipes/*.json'):
+		with open(file_path,'r') as rules_handle:
+			try:
+				rulefileobj =  json.load(rules_handle)
+				title =  rulefileobj['title'] if 'title' in rulefileobj else os.path.basename(file_path)
+			except:
+				title = 'Error: recipes/' + os.path.basename(file_path) + " is not a valid JSON formatted recipe." 
+
+			items.append( [title, 'recipes/' + os.path.basename(file_path), False ])
+
+	return items
+
+
 # Populate list of rules. (rules_file is a HistoryDatasetAssociation)
 # rule_sections qualifier unused at moment
-def get_rule_list():
+def get_rule_list(new_option=True):
 
-	global rulesets
+	global sections, rc_functions
+	if not rc_functions:
+		get_function_list()
+
 	log( "\nget_rule_list() ")
 	
 	items = []
 
-	if rulesets:
-		for section in rulesets:
+	if sections:
+		for section in sections:
 			section_name = section['name']
 			if 'rules' in section:
 				for (ptr2, rule) in enumerate(section['rules']):
@@ -88,11 +116,12 @@ def get_rule_list():
 						except Exception,e: 
 							log("\nError: " + str(e) + '\n Rule: ' + str(rule) )
 
-	if len(items) == 0:
+	if len(items) == 0 and new_option == True:
 		section_name = 'Processing:None'
 		items= [ [section_name + ' - new rule ...', section_name, True] ]
 	
 	return items
+
 
 def ruleFormat(rule):
 	global rc_functions
@@ -107,27 +136,56 @@ def ruleFormat(rule):
 			if isinstance(term, list): #Recursive call
 				midlings.append(ruleFormat(term))
 			else:
-				if not isinstance(term, basestring):
+				if isinstance(term, basestring):
+					if ' ' in term and term[0] != '"':
+						term =  '"' + term + '"'
+				else:
 					term = str(term ) #Ensures numeric or boolean term converted here; otherwise can't do "c in term"
-				# We have to put quotes around a string term if it has %, or space in it - to show how it should be, even if in json file it is wrong.
 					
 				midlings.append(term)
-
+		
+		print midlings
 		#If first item is interpretable as a function, return it with parameters bracketed,
 		if midlings[0] in rc_functions:
 			return midlings[0]+ '( ' + ' '.join(midlings[1:]) + ' ) \n' 
 		# otherwise return string straight since it may have infix() items.
 		else:
 			return ' ( ' + ' '.join(midlings)  + ' ) \n' 
-
+		
 	else:
 		return rule
 			
+			
+def quotify(content):
+
+	for (ptr, item) in enumerate(content):
+		if isinstance(item, basestring) and ' ' in item:
+			content[ptr] = '"' + item + '"'
+
+	return ' '.join(content)
 	
+def get_rule_variables():
+
+	global sections
+	log( "\nget_rule_variables() ")
+	
+	items = []
+
+	if sections:
+		for section in sections:
+			if section['name'] == 'Ontology' and '@context' in section:
+				for name in section['@context'].keys():
+					items.append( [ name, name, False ])	
+
+	items.sort(key=lambda x: x[1])
+	
+	return items
+
+
 # Populate list of available functions from python operator list as well as QC specific Iterables and NonIterables.
 def get_function_list():
 
-	global rulesets, rc_functions
+	global sections, rc_functions
 	
 	log( "\nget_function_list() ")
 			
@@ -137,7 +195,7 @@ def get_function_list():
 	rc_functions = []
 	
 	# self.function definition is one step removed, so have to get function this way:
-	for myMethodName in RCQC.functions:
+	for myMethodName in RCQC.functions.keys():
 		rc_functions.append(myMethodName)
 		
 		myMethod = RCQC.functions[myMethodName]

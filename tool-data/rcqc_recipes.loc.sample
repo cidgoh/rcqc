@@ -1,0 +1,3 @@
+#Value  name
+recipes/spades_contigs.json	Spades contigs qc
+recipes/spades_filtered_repeat_contigs.json	Spades filtered repeat contigs qc
