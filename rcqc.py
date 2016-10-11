@@ -238,7 +238,7 @@ class RCQCInterpreter(object):
 		NOTE: Ordering of execute_sections doesn't matter.  Execution order depends on sections order.
 		"""
 		section = next((x for x in self.namespace['sections'] if x['name'] == section_name), None)
-		if DEBUG > 0: print self.section
+		if DEBUG > 0: print section
 				
 		if 'rules' in section:
 			for (row, myRule) in enumerate(section['rules']):

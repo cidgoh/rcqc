@@ -51,32 +51,38 @@
 		 "rules": [
 			[ "report/contigs/{contigItemR}/name", "=", "myFileIterator/name"],
 			[ "clear", "report/contigs/{contigItemR}/basepairs" ],
+			[ "cut_contig_count", "=", 0],
 			[ "iterate", [ "readFileByName", "myFileIterator" ], "myLineDict",
 				[ "iif", [ [ "getitem", "myLineDict/value", 0 ], "==", "\">\"" ],
 					[ 	
 						[ "process_fasta", "=", false],
 						[ "iterate" , [ "regexp", "myLineDict/value", "regexp_fasta_data" ], "tempDict",
-							[ "if", ["tempDict/value", ">=", "contig_length_QC_threshold" ],
-								[ "process_fasta", "=", true ],
-								[ "{contigItemR}/id", "=", "tempDict/id"],
-								[ "append", "tempDict/value", "{contigItemR}/contig_lengths"] ]
+							[ "iif", ["tempDict/value", ">=", "report/parameters/contig_length_QC_threshold" ],
+								[
+									[ "process_fasta", "=", true ],
+									[ "{contigItemR}/id", "=", "tempDict/id"],
+									[ "append", "tempDict/value", "{contigItemR}/contig_lengths"] 
+								],
+								[  "cut_contig_count", "+=", 1]
+							]
 						]
 					],
 					[ "if", "process_fasta", ["iStatBP", "basepairs", "myLineDict/value"] ]
 				]
 			],
 			[ "contig_lengths", "=", [ "sorted", "contig_lengths" ] ],
-
 			[ "{contigItemR}/min_contig_length", "=", "contig_lengths/0" ],
 			[ "{contigItemR}/max_contig_length", "=", ["last", "contig_lengths"] ],
 			[ "{contigItemR}/assembly_genome_size", "=", [ "parseInt", [ "fsum", "contig_lengths" ] ] ],
 			[ "{contigItemR}/contig_count" , "=", [ "length", "contig_lengths" ] ],
+			[ "{contigItemR}/cut_contig_count", "=", "cut_contig_count"],
+			[ "{contigItemR}/cut_contig%", "=", ["parseInt", ["cut_contig_count", "/", [ "contig_count","+","cut_contig_count" ] , "*" , 100] ] ],
 			[ "if", "reference_genome_size" , ">", 0, 
 			     [ "{contigItemR}/genome_size_ratio", "=", [ "round", [ [ "abs", [ "assembly_genome_size", "-", "reference_genome_size" ] ], "/", "reference_genome_size" ], 2 ] ]
 			],
 			[ "append", [ "statisticN", "contig_lengths", 50, "reference_genome_size" ], "{contigItemR}" ],
-			[ "append", [ "statisticN", "contig_lengths", 99, "reference_genome_size" ], "{contigItemR}" ]
-
+			[ "append", [ "statisticN", "contig_lengths", 99, "reference_genome_size" ], "{contigItemR}" ],
+			[ "{contigItemR}/contig_length_QC_threshold", "=", "contig_length_QC_threshold" ]
             ]
         },
 	{ "name": "Quality control",
