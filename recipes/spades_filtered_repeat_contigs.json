@@ -40,7 +40,7 @@
 		"rules": [
 			[ "note", "Look for *.fasta in input set of file names; for each match, call it 'contigItem', and read through it to find >[fasta definition line].  Match contents to regular expression length_XXX_cov_YYY_ID_ZZZ, and make an array out of the length numbers, etc. for stats."],
 			[ "iterate", "files" , "myFileIterator", 
-				[ "contigItemR", "=", ["raw/" , "+",  ["basename", "myFileIterator/value"] ] ],
+				[ "contigItem", "=", ["raw/" , "+",  ["basename", "myFileIterator/value"] ] ],
 				[ "function", "Contig Stats"],
 				[ "function", "Quality control"]
 			]	
@@ -49,8 +49,8 @@
          { "name": "Contig Stats",
            "type": "function",
 		 "rules": [
-			[ "report/contigs/{contigItemR}/name", "=", "myFileIterator/name"],
-			[ "clear", "report/contigs/{contigItemR}/basepairs" ],
+			[ "report/contigs/{contigItem}/name", "=", "myFileIterator/name"],
+			[ "clear", "report/contigs/{contigItem}/basepairs" ],
 			[ "iterate", [ "readFileByName", "myFileIterator" ], "myLineDict",
 				[ "iif", [ [ "getitem", "myLineDict/value", 0 ], "==", "\">\"" ],
 					[ 
@@ -58,23 +58,23 @@
 						[ "iterate" , [ "regexp", "myLineDict/value", "regexp_fasta_data" ], "tempDict",
 							[ "if", ["tempDict/value", ">=", "contig_length_QC_threshold" ],
 								[ "process_fasta", "=", true ],
-									[ "{contigItemR}/id", "=", "tempDict/id"],
-								[ "append", "tempDict/value", "{contigItemR}/contig_lengths"] ]
+									[ "{contigItem}/id", "=", "tempDict/id"],
+								[ "append", "tempDict/value", "{contigItem}/contig_lengths"] ]
 						]
 					],
 					[ "if", "process_fasta", ["iStatBP", "basepairs", "myLineDict/value"] ]
 				]
 			],
 			[ "contig_lengths", "=", [ "sorted", "contig_lengths" ] ],
-			[ "{contigItemR}/min_contig_length", "=", "contig_lengths/0" ],
-			[ "{contigItemR}/max_contig_length", "=", ["last", "contig_lengths"] ],
-			[ "{contigItemR}/assembly_genome_size", "=", [ "parseInt", [ "fsum", "contig_lengths" ] ] ],
-			[ "{contigItemR}/contig_count" , "=", [ "length", "contig_lengths" ] ],
+			[ "{contigItem}/min_contig_length", "=", "contig_lengths/0" ],
+			[ "{contigItem}/max_contig_length", "=", ["last", "contig_lengths"] ],
+			[ "{contigItem}/assembly_genome_size", "=", [ "parseInt", [ "fsum", "contig_lengths" ] ] ],
+			[ "{contigItem}/contig_count" , "=", [ "length", "contig_lengths" ] ],
 			[ "if", "reference_genome_size" , ">", 0, 
-			     [ "{contigItemR}/genome_size_ratio", "=", [ "round", [ [ "abs", [ "assembly_genome_size", "-", "reference_genome_size" ] ], "/", "reference_genome_size" ], 2 ] ]
+			     [ "{contigItem}/genome_size_ratio", "=", [ "round", [ [ "abs", [ "assembly_genome_size", "-", "reference_genome_size" ] ], "/", "reference_genome_size" ], 2 ] ]
 			],
-			[ "append", [ "statisticN", "contig_lengths", 50, "reference_genome_size" ], "{contigItemR}" ],
-			[ "append", [ "statisticN", "contig_lengths", 99, "reference_genome_size" ], "{contigItemR}" ]
+			[ "append", [ "statisticN", "contig_lengths", 50, "reference_genome_size" ], "{contigItem}" ],
+			[ "append", [ "statisticN", "contig_lengths", 99, "reference_genome_size" ], "{contigItem}" ]
 
             ]
         },

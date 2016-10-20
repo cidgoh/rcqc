@@ -5,6 +5,7 @@ import os, sys, json, glob
 import inspect
 import operator
 import math
+import datetime
 
 # From http://code.activestate.com/recipes/66062-determining-current-function-name/
 SELF_DIR = os.path.dirname(sys._getframe().f_code.co_filename)
@@ -13,21 +14,22 @@ import rcqc
 from rcqc_functions.rcqc_functions import RCQCClassFnExtension
 from rcqc_functions.rcqc_functions import RCQCStaticFnExtension
 
-DEBUG =0
-
-if DEBUG== 1:
-	with open( SELF_DIR + '/log.txt', 'w') as log_handle:
-		log_handle.write( "Starting ...\n")
-		
 sections = None
 rc_functions = None
 
-def log(message):
+DEBUG = 0
+	
+def log(message, mode = 'a'):
+	global DEBUG
 	if DEBUG== 1:
-		with open( SELF_DIR + '/log.txt', 'a') as log_handle:
-			log_handle.write(message)
+		with open( SELF_DIR + '/log.txt', mode) as log_handle:
+			log_handle.write( str(message) )
+
+#This script is just loaded for its functions, so log command below never run at time/location one would expect?	
+log( "Starting at " + datetime.datetime.now().strftime("%B %d, %Y %I:%M%p") + '...\n', 'w')
 
 def loglines(lines):
+	global DEBUG
 	if DEBUG== 1:
 		with open( SELF_DIR + '/log.txt', 'a') as log_handle:
 			log_handle.writelines(lines)
@@ -49,6 +51,7 @@ def get_rule_section(recipe_file, rules_file):
 		log(rules_file.file_name)
 
 		try:
+
 			with open(SELF_DIR + '/' + rules_file.file_name, 'r') as rules_handle:
 				rulefileobj =  json.load(rules_handle)
 				log("Recipe file json parsed")
@@ -88,16 +91,32 @@ def get_recipe_list():
 
 # Populate list of rules. (rules_file is a HistoryDatasetAssociation)
 # rule_sections qualifier unused at moment
-def get_rule_list(new_option=True):
+def get_rule_list(new_option=True, reference = None ):
 
-	global sections, rc_functions
+	global sections, rc_functions, SELF_DIR
 	if not rc_functions:
 		get_function_list()
 
 	log( "\nget_rule_list() ")
-	
-	items = []
-
+	log('\nreference selection:' + str(reference) ) 
+		
+	items =  []
+	try:
+		if reference == None: pass
+		else: #if isnumeric( reference):
+			# CURRENTLY GETTING THIS DIRECTLY FROM tab-delimited SAMPLE .rcqc_parameters.loc.sample FILE
+			with open(SELF_DIR + '/tool-data/rcqc_parameters.loc.sample', 'r') as reference_handle:
+				for ptr, line in enumerate(reference_handle):
+					if not line[0] == '#': # commented out lines
+						parsed = line.split('	') # split line into tab-delimited items
+						if parsed[0] == reference and len(parsed) == 3:
+							(row, key, value) = line.split('	') # tab separated
+							ruleString = 'reference %s (line %s): %s = %s' % (reference, str(ptr), key, value)
+							items.append( [ ruleString, ruleString, False ])
+	except Exception as e: # includes  SystemExit
+		log ("ERROR" + str(e) )
+		
+		
 	if sections:
 		for section in sections:
 			section_name = section['name']
@@ -107,15 +126,11 @@ def get_rule_list(new_option=True):
 			
 						try:
 							ruleString = section_name + ': ' + str(ptr2) + ': ' + ruleFormat(rule)
-							# Any html tag ends need replacing, and limit thing to 100 characters.
-							# ARCHAIC? ruleString = ruleString.replace('<','&lt;').replace('>','&gt;')
-							# ruleString = ruleString[:140] # cap it at 140 characters.
-							# if len(ruleString) == 140: ruleString = ruleString + '...'
 							items.append( [ ruleString, section_name + ":" + str(ptr2), False ])	
 
 						except Exception,e: 
 							log("\nError: " + str(e) + '\n Rule: ' + str(rule) )
-
+	
 	if len(items) == 0 and new_option == True:
 		section_name = 'Processing:None'
 		items= [ [section_name + ' - new rule ...', section_name, True] ]
@@ -132,7 +147,7 @@ def ruleFormat(rule):
 	if  hasattr(rule, '__iter__'):
 
 		for term in rule:
-			log('\nTerm ' + str(term))
+			# log('\nTerm ' + str(term))
 			if isinstance(term, list): #Recursive call
 				midlings.append(ruleFormat(term))
 			else:

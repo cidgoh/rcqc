@@ -60,7 +60,7 @@
     <inputs>
 		<param name="input_files" type="data" format="tabular,txt,json" multiple="true" label="Log or report file(s) to analyze"/> 
 
-		<param name="daisychain" type="data" format="json" optional="True" label="Input report (JSON)"/> 
+		<param name="daisychain" type="data" format="json" optional="True" label="Input report (JSON format)"/> 
 
 		<param name="reference" type="select" label="Reference Genome" optional="True" help="Select a reference genome to have related settings (e.g. good reference genome size ratio) inserted into the recipe job.">
     			<options from_data_table="rcqc_parameters">
@@ -76,11 +76,11 @@
 		<param name="optional_section" type="select" display="radio" label="Recipe script option" dynamic_options="get_rule_section(recipe_file, False)" help="If the recipe script has optional sections, choose one here." optional="True" > <!-- ,rules_file -->
 		 </param>
 		 
-		<param name="recipe_viewer" type="select" label="Recipe viewer" dynamic_options="get_rule_list(False)" multiple="False" optional="False"  refresh_on_change="True" help="Click to view the recipe script's statements. This is not an input." />
+		<param name="recipe_viewer" type="select" label="Recipe viewer" dynamic_options="get_rule_list(False, reference)" multiple="False" optional="False"  refresh_on_change="True" help="Click to view the recipe script's statements. This is not an input." />
 		
 		<repeat name="settings" title="Add setting" min="0" help="A setting here will override one that is in a 'Setting[...]' section of the recipe.">
 			<param name="variable" type="select" dynamic_options="get_rule_variables()" label="Set" />
-			<param name="value" type="text" value="" label="=" /><!-- Allows for textual values -->
+			<param name="value" type="text" value="" label="=" /><!-- Allows for textual values  -->
 			<!--
 				<validator type="regex" message="Please input a number">([0-9]+|[0-9]*\.[0-9]+)</validator>
 			</param>

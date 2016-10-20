@@ -1,4 +1,4 @@
-#Value  type    name
+#Value	type	name
 0	label	No reference genome
 0	contig_count_QC_threshold	200
 0	contig_length_QC_threshold	0
